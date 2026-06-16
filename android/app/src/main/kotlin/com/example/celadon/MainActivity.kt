@@ -1,4 +1,4 @@
-package com.example.chroni_book
+package com.example.celadon
 
 import io.flutter.embedding.android.FlutterActivity
 
