@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:file_picker/file_picker.dart';
+import 'secrets.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +36,148 @@ class CeladonColors {
   static const calBrownDark = Color(0xFF4A2E14);
   static const calCream     = Color(0xFFD4B896);
   static const calSurface   = Color(0xFF7A4F2D);
+}
+
+// ─── PRESSABLE (shared hover-lift animation) ────────────────────────────────
+//
+// Wrap any tappable widget to get a tactile hover response on devices with a
+// pointer (web/desktop/trackpad/stylus) — scales up slightly and lifts with a
+// soft shadow while the pointer rests over it, settling back when it leaves.
+// onTap still fires normally for touch devices, which have no hover state.
+// Centralized here so every card / chip / button in the app feels consistent.
+
+class Pressable extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final double hoverScale;
+  final Duration duration;
+
+  const Pressable({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.hoverScale = 1.04,
+    this.duration = const Duration(milliseconds: 180),
+  });
+
+  @override
+  State<Pressable> createState() => _PressableState();
+}
+
+class _PressableState extends State<Pressable> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+  late final Animation<double> _lift;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: widget.duration);
+    _scale = Tween<double>(begin: 1.0, end: widget.hoverScale)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _lift = Tween<double>(begin: 0.0, end: 6.0)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _onEnter(_) => _ctrl.forward();
+  void _onExit(_) => _ctrl.reverse();
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: _onEnter,
+      onExit: _onExit,
+      cursor: widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedBuilder(
+          animation: _ctrl,
+          builder: (context, child) => Transform.translate(
+            offset: Offset(0, -_lift.value),
+            child: Transform.scale(scale: _scale.value, child: child),
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── ADD BUTTON (pinned + button with a playful hover wiggle) ──────────────
+
+class _AddButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const _AddButton({required this.onTap});
+
+  @override
+  State<_AddButton> createState() => _AddButtonState();
+}
+
+class _AddButtonState extends State<_AddButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+  late final Animation<double> _rotation;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _scale = Tween<double>(begin: 1.0, end: 1.12).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _rotation = Tween<double>(begin: 0.0, end: 0.2).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => _ctrl.forward(),
+      onExit: (_) => _ctrl.reverse(),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedBuilder(
+          animation: _ctrl,
+          builder: (context, child) => Transform.scale(
+            scale: _scale.value,
+            child: Transform.rotate(angle: _rotation.value, child: child),
+          ),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: CeladonColors.sage,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: CeladonColors.sage.withAlpha(90),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.add_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ─── DATA MODELS ─────────────────────────────────────────────────────────────
@@ -257,7 +403,7 @@ class _MainShellState extends State<MainShell> {
     final screens = [
       const TodayScreen(),
       const StudyScreen(),
-      const AllTasksScreen(),
+      const SyllabusScreen(),
     ];
 
     return Scaffold(
@@ -281,7 +427,7 @@ class _NotebookNavBar extends StatelessWidget {
     const items = [
       (Icons.today_rounded, 'Today'),
       (Icons.menu_book_rounded, 'Study'),
-      (Icons.list_alt_rounded, 'All Tasks'),
+      (Icons.route_rounded, 'Roadmap'),
     ];
 
     return Container(
@@ -298,11 +444,12 @@ class _NotebookNavBar extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               for (int i = 0; i < items.length; i++)
-                GestureDetector(
+                Pressable(
+                  hoverScale: 1.08,
                   onTap: () => onTap(i),
-                  behavior: HitTestBehavior.opaque,
                   child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                     decoration: BoxDecoration(
                       color: currentIndex == i ? CeladonColors.sageLight : Colors.transparent,
@@ -311,9 +458,15 @@ class _NotebookNavBar extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(items[i].$1,
-                            color: currentIndex == i ? CeladonColors.sage : CeladonColors.mutedSage,
-                            size: 22),
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 1.0, end: currentIndex == i ? 1.18 : 1.0),
+                          duration: const Duration(milliseconds: 280),
+                          curve: Curves.easeOutBack,
+                          builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+                          child: Icon(items[i].$1,
+                              color: currentIndex == i ? CeladonColors.sage : CeladonColors.mutedSage,
+                              size: 22),
+                        ),
                         const SizedBox(height: 3),
                         Text(items[i].$2,
                             style: TextStyle(
@@ -371,9 +524,34 @@ class _RuledLinePainter extends CustomPainter {
 // ─── MINI CALENDAR WIDGET (tilted, on every screen) ──────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class MiniCalendarWidget extends StatelessWidget {
+class MiniCalendarWidget extends StatefulWidget {
   final List<Task> todayTasks;
   const MiniCalendarWidget({super.key, this.todayTasks = const []});
+
+  @override
+  State<MiniCalendarWidget> createState() => _MiniCalendarWidgetState();
+}
+
+class _MiniCalendarWidgetState extends State<MiniCalendarWidget> with SingleTickerProviderStateMixin {
+  late final AnimationController _tiltCtrl;
+  late final Animation<double> _tilt;
+
+  static const _restAngle = -0.06; // subtle tilt — like placed on a desk
+  static const _pressAngle = -0.01; // nearly straightens when pressed
+
+  @override
+  void initState() {
+    super.initState();
+    _tiltCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _tilt = Tween<double>(begin: _restAngle, end: _pressAngle)
+        .animate(CurvedAnimation(parent: _tiltCtrl, curve: Curves.easeOutCubic));
+  }
+
+  @override
+  void dispose() {
+    _tiltCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -382,9 +560,13 @@ class MiniCalendarWidget extends StatelessWidget {
     final todayEvent = calState.eventFor(now);
 
     return GestureDetector(
+      onTapDown: (_) => _tiltCtrl.forward(),
+      onTapUp: (_) => _tiltCtrl.reverse(),
+      onTapCancel: () => _tiltCtrl.reverse(),
       onTap: () => _openFullCalendar(context),
-      child: Transform.rotate(
-        angle: -0.06, // subtle tilt — like placed on a desk
+      child: AnimatedBuilder(
+        animation: _tilt,
+        builder: (context, child) => Transform.rotate(angle: _tilt.value, child: child),
         child: Container(
           width: 115,
           padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
@@ -469,9 +651,9 @@ class MiniCalendarWidget extends StatelessWidget {
                               fontWeight: FontWeight.w600,
                             ),
                           )
-                        else if (todayTasks.isNotEmpty)
+                        else if (widget.todayTasks.isNotEmpty)
                           Text(
-                            '${todayTasks.length} tasks',
+                            '${widget.todayTasks.length} tasks',
                             style: const TextStyle(
                               fontSize: 7,
                               color: CeladonColors.calCream,
@@ -810,7 +992,8 @@ class _FullCalendarModalState extends State<FullCalendarModal> {
                   d.year == _selectedDay!.year;
               final event = calState.eventFor(d);
 
-              return GestureDetector(
+              return Pressable(
+                hoverScale: 1.15,
                 onTap: () => setState(() => _selectedDay = d),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
@@ -1051,8 +1234,9 @@ class _TypeBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Pressable(
       onTap: onTap,
+      hoverScale: 1.06,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -1393,29 +1577,7 @@ class _TodayScreenState extends State<TodayScreen> {
                             Positioned(
                               bottom: 12,
                               right: 12,
-                              child: GestureDetector(
-                                onTap: _showAddSheet,
-                                child: Container(
-                                  width: 38,
-                                  height: 38,
-                                  decoration: BoxDecoration(
-                                    color: CeladonColors.sage,
-                                    borderRadius: BorderRadius.circular(12),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: CeladonColors.sage.withAlpha(90),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 3),
-                                      ),
-                                    ],
-                                  ),
-                                  child: const Icon(
-                                    Icons.add_rounded,
-                                    color: Colors.white,
-                                    size: 22,
-                                  ),
-                                ),
-                              ),
+                              child: _AddButton(onTap: _showAddSheet),
                             ),
                           ],
                         ),
@@ -1910,7 +2072,7 @@ class _AddTaskSheetState extends State<_AddTaskSheet> {
 
 // ─── COMPACT TASK CARD (left panel) ──────────────────────────────────────────
 
-class _CompactTaskCard extends StatelessWidget {
+class _CompactTaskCard extends StatefulWidget {
   final Task task;
   final VoidCallback onToggle;
   final VoidCallback onDelete;
@@ -1921,11 +2083,42 @@ class _CompactTaskCard extends StatelessWidget {
   });
 
   @override
+  State<_CompactTaskCard> createState() => _CompactTaskCardState();
+}
+
+class _CompactTaskCardState extends State<_CompactTaskCard> with SingleTickerProviderStateMixin {
+  late final AnimationController _checkCtrl;
+  late final Animation<double> _checkPop;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+    _checkPop = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.35).chain(CurveTween(curve: Curves.easeOut)), weight: 40),
+      TweenSequenceItem(tween: Tween(begin: 1.35, end: 1.0).chain(CurveTween(curve: Curves.easeOut)), weight: 60),
+    ]).animate(_checkCtrl);
+  }
+
+  @override
+  void dispose() {
+    _checkCtrl.dispose();
+    super.dispose();
+  }
+
+  void _handleToggle() {
+    // Only pop when transitioning into "done" — undoing doesn't need the flourish
+    if (!widget.task.isDone) _checkCtrl.forward(from: 0);
+    widget.onToggle();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final task = widget.task;
     return Dismissible(
       key: Key('cmp-${task.id}'),
       direction: DismissDirection.endToStart,
-      onDismissed: (_) => onDelete(),
+      onDismissed: (_) => widget.onDelete(),
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 12),
@@ -1935,8 +2128,9 @@ class _CompactTaskCard extends StatelessWidget {
         ),
         child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 16),
       ),
-      child: GestureDetector(
-        onTap: onToggle,
+      child: Pressable(
+        hoverScale: 1.015,
+        onTap: _handleToggle,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           margin: const EdgeInsets.only(bottom: 6),
@@ -1957,20 +2151,24 @@ class _CompactTaskCard extends StatelessWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.only(top: 1),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 16, height: 16,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: task.isDone ? CeladonColors.sage : Colors.transparent,
-                    border: Border.all(
-                      color: task.isDone ? CeladonColors.sage : CeladonColors.mutedSage,
-                      width: 1.5,
+                child: AnimatedBuilder(
+                  animation: _checkPop,
+                  builder: (context, child) => Transform.scale(scale: _checkPop.value, child: child),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 16, height: 16,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: task.isDone ? CeladonColors.sage : Colors.transparent,
+                      border: Border.all(
+                        color: task.isDone ? CeladonColors.sage : CeladonColors.mutedSage,
+                        width: 1.5,
+                      ),
                     ),
+                    child: task.isDone
+                        ? const Icon(Icons.check_rounded, size: 9, color: Colors.white)
+                        : null,
                   ),
-                  child: task.isDone
-                      ? const Icon(Icons.check_rounded, size: 9, color: Colors.white)
-                      : null,
                 ),
               ),
               const SizedBox(width: 7),
@@ -2889,57 +3087,639 @@ class _SubjectHourChip extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── SCREEN 3: ALL TASKS ─────────────────────────────────────────────────────
+// ─── SCREEN 3: SYLLABUS ROADMAP ──────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class AllTasksScreen extends StatelessWidget {
-  const AllTasksScreen({super.key});
+// Uses geminiApiKey from secrets.dart (gitignored)
+
+/// A chapter/topic extracted from a syllabus.
+class _SyllabusChapter {
+  final String title;
+  final String description;
+  bool isDone;
+  int assignedDay; // 1-based day number in the plan
+
+  _SyllabusChapter({
+    required this.title,
+    this.description = '',
+    this.isDone = false,
+    this.assignedDay = 1,
+  });
+}
+
+/// A subject with its parsed syllabus and roadmap.
+class _SyllabusSubject {
+  final String name;
+  final Color color;
+  final int totalDays;
+  final List<_SyllabusChapter> chapters;
+  final DateTime createdAt;
+
+  _SyllabusSubject({
+    required this.name,
+    required this.color,
+    required this.totalDays,
+    required this.chapters,
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
+
+  int get completedCount => chapters.where((c) => c.isDone).length;
+  double get progress => chapters.isEmpty ? 0 : completedCount / chapters.length;
+  int get currentDay {
+    final elapsed = DateTime.now().difference(createdAt).inDays + 1;
+    return elapsed.clamp(1, totalDays);
+  }
+}
+
+class SyllabusScreen extends StatefulWidget {
+  const SyllabusScreen({super.key});
+
+  @override
+  State<SyllabusScreen> createState() => _SyllabusScreenState();
+}
+
+class _SyllabusScreenState extends State<SyllabusScreen> {
+  final List<_SyllabusSubject> _subjects = [];
+  bool _isLoading = false;
+  String? _error;
+
+  // ── Pick file & parse with Gemini ───────────────────────────────────────
+  Future<void> _addSyllabus() async {
+    // 1. Get subject name and days
+    final meta = await _showMetaDialog();
+    if (meta == null) return;
+    final subjectName = meta.$1;
+    final days = meta.$2;
+
+    // 2. Pick file
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    if (file.bytes == null) return;
+
+    setState(() { _isLoading = true; _error = null; });
+
+    try {
+      // 3. Call Gemini
+      final model = GenerativeModel(
+        model: 'gemini-2.0-flash',
+        apiKey: geminiApiKey,
+      );
+
+      final prompt = '''
+You are a syllabus parser. Analyze the uploaded document and extract ALL chapters/topics/units from it.
+
+Return ONLY a valid JSON array, nothing else. Each element should be:
+{"title": "Chapter/Topic name", "description": "Brief 1-line summary of what this covers"}
+
+Rules:
+- Extract every distinct chapter, unit, or major topic
+- Keep titles concise but descriptive
+- Order them in the logical study sequence
+- If you can't parse the document, return: [{"title": "Could not parse", "description": "Please try a clearer image or PDF"}]
+
+Return ONLY the JSON array, no markdown, no explanation.
+''';
+
+      final mimeType = file.extension == 'pdf' ? 'application/pdf' : 'image/${file.extension}';
+      final response = await model.generateContent([
+        Content.multi([
+          TextPart(prompt),
+          DataPart(mimeType, file.bytes!),
+        ]),
+      ]);
+
+      final text = response.text ?? '';
+      // Extract JSON from response (handle markdown code blocks)
+      var jsonStr = text.trim();
+      if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replaceAll(RegExp(r'^```[a-z]*\n?', multiLine: true), '').replaceAll('```', '').trim();
+      }
+
+      final List<dynamic> parsed = json.decode(jsonStr);
+      final chapters = <_SyllabusChapter>[];
+      for (int i = 0; i < parsed.length; i++) {
+        final ch = parsed[i];
+        final dayAssignment = days > 0 ? ((i * days) ~/ parsed.length) + 1 : 1;
+        chapters.add(_SyllabusChapter(
+          title: ch['title'] ?? 'Topic ${i + 1}',
+          description: ch['description'] ?? '',
+          assignedDay: dayAssignment.clamp(1, days),
+        ));
+      }
+
+      const palette = [
+        Color(0xFF7C9A7E), Color(0xFFD4956A), Color(0xFF6A8FA0),
+        Color(0xFF9B8EA0), Color(0xFFA09B6A), Color(0xFFB07878),
+        Color(0xFF8B7EC7), Color(0xFF5D9B9B),
+      ];
+
+      setState(() {
+        _subjects.add(_SyllabusSubject(
+          name: subjectName,
+          color: palette[_subjects.length % palette.length],
+          totalDays: days,
+          chapters: chapters,
+        ));
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _error = 'Failed to parse: ${e.toString().length > 80 ? '${e.toString().substring(0, 80)}...' : e}';
+      });
+    }
+  }
+
+  // ── Meta dialog (subject name + days) ───────────────────────────────
+  Future<(String, int)?> _showMetaDialog() async {
+    final nameCtrl = TextEditingController();
+    final daysCtrl = TextEditingController(text: '30');
+    return showDialog<(String, int)>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: CeladonColors.pageWhite,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('New Syllabus', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              style: const TextStyle(fontSize: 14, color: CeladonColors.inkBrown),
+              decoration: InputDecoration(
+                labelText: 'Subject Name',
+                labelStyle: const TextStyle(color: CeladonColors.mutedSage, fontSize: 13),
+                filled: true, fillColor: CeladonColors.cream,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: daysCtrl,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(fontSize: 14, color: CeladonColors.inkBrown),
+              decoration: InputDecoration(
+                labelText: 'Days to finish',
+                labelStyle: const TextStyle(color: CeladonColors.mutedSage, fontSize: 13),
+                suffix: const Text('days', style: TextStyle(fontSize: 12, color: CeladonColors.mutedSage)),
+                filled: true, fillColor: CeladonColors.cream,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: CeladonColors.mutedSage))),
+          TextButton(
+            onPressed: () {
+              final name = nameCtrl.text.trim();
+              final days = int.tryParse(daysCtrl.text) ?? 30;
+              if (name.isEmpty) return;
+              Navigator.pop(ctx, (name, days.clamp(1, 365)));
+            },
+            child: const Text('Pick File →', style: TextStyle(color: CeladonColors.sage, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final groups = {
-      'Today': [
-        Task(id: 'a1', title: 'Read Chapter 7 — Organic Chem', subject: 'Chemistry', priority: Priority.high),
-        Task(id: 'a2', title: 'Complete Math problem set', subject: 'Mathematics', isDone: true, priority: Priority.medium),
-      ],
-      'Tomorrow': [
-        Task(id: 'b1', title: 'Lab report write-up', subject: 'Physics', priority: Priority.high),
-        Task(id: 'b2', title: 'Vocabulary quiz prep', subject: 'English Lit', priority: Priority.low),
-      ],
-      'This Week': [
-        Task(id: 'c1', title: 'Chapter 9 summary', subject: 'History', priority: Priority.medium),
-        Task(id: 'c2', title: 'Practice integration problems', subject: 'Mathematics', priority: Priority.medium),
-        Task(id: 'c3', title: 'Group study session', subject: 'General', priority: Priority.low),
-      ],
-    };
-
     return Scaffold(
       backgroundColor: CeladonColors.cream,
       body: NotebookBackground(
         child: SafeArea(
           child: CustomScrollView(
             slivers: [
+              // ── Header
               SliverToBoxAdapter(
-                child: ScreenHeader(eyebrow: 'ALL TASKS', title: 'Everything'),
+                child: ScreenHeader(
+                  eyebrow: 'SYLLABUS',
+                  title: 'Roadmap',
+                ),
               ),
-              for (final entry in groups.entries) ...[
+
+              // ── Error banner
+              if (_error != null)
                 SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(64, 20, 20, 8),
-                    child: Text(entry.key.toUpperCase(),
-                        style: const TextStyle(fontSize: 11, letterSpacing: 1.5,
-                            color: CeladonColors.mutedSage, fontWeight: FontWeight.w600)),
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFDE8E8),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFD96060).withAlpha(80)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline_rounded, size: 16, color: Color(0xFFD96060)),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 11, color: Color(0xFFD96060)))),
+                        GestureDetector(
+                          onTap: () => setState(() => _error = null),
+                          child: const Icon(Icons.close_rounded, size: 14, color: Color(0xFFD96060)),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                SliverList(delegate: SliverChildBuilderDelegate(
-                  (ctx, i) => TaskCard(task: entry.value[i], onToggle: () {}),
-                  childCount: entry.value.length,
-                )),
+
+              // ── Loading
+              if (_isLoading)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5, color: CeladonColors.sage)),
+                          SizedBox(height: 12),
+                          Text('AI is reading your syllabus...', style: TextStyle(fontSize: 12, color: CeladonColors.mutedSage, fontStyle: FontStyle.italic)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // ── Empty state
+              if (_subjects.isEmpty && !_isLoading)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 40),
+                    child: Column(
+                      children: [
+                        Icon(Icons.auto_stories_rounded, size: 52, color: CeladonColors.mutedSage.withAlpha(120)),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No syllabi yet',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Upload a syllabus PDF or image and\nAI will generate your study roadmap',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12, color: CeladonColors.mutedSage, height: 1.5),
+                        ),
+                        const SizedBox(height: 20),
+                        GestureDetector(
+                          onTap: _isLoading ? null : _addSyllabus,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: CeladonColors.sage,
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: [BoxShadow(color: CeladonColors.sage.withAlpha(60), blurRadius: 8, offset: const Offset(0, 3))],
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.upload_file_rounded, size: 16, color: Colors.white),
+                                SizedBox(width: 8),
+                                Text('Upload Syllabus', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // ── Subject roadmap cards
+              if (_subjects.isNotEmpty) ...[
+                // Add button row
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(28, 12, 24, 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${_subjects.length} SUBJECT${_subjects.length > 1 ? 'S' : ''}',
+                          style: const TextStyle(fontSize: 10, letterSpacing: 1.5, color: CeladonColors.mutedSage, fontWeight: FontWeight.w700),
+                        ),
+                        const Spacer(),
+                        GestureDetector(
+                          onTap: _isLoading ? null : _addSyllabus,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: CeladonColors.sageLight,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.add_rounded, size: 12, color: CeladonColors.sage),
+                                SizedBox(width: 3),
+                                Text('Add Syllabus', style: TextStyle(fontSize: 10, color: CeladonColors.sage, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Subject cards
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (ctx, i) => _SyllabusCard(
+                      subject: _subjects[i],
+                      onToggleChapter: (chIdx) {
+                        setState(() => _subjects[i].chapters[chIdx].isDone = !_subjects[i].chapters[chIdx].isDone);
+                      },
+                      onDelete: () => setState(() => _subjects.removeAt(i)),
+                    ),
+                    childCount: _subjects.length,
+                  ),
+                ),
               ],
+
               const SliverToBoxAdapter(child: SizedBox(height: 80)),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── SYLLABUS CARD (expandable) ───────────────────────────────────────────────
+
+class _SyllabusCard extends StatefulWidget {
+  final _SyllabusSubject subject;
+  final void Function(int chapterIndex) onToggleChapter;
+  final VoidCallback onDelete;
+  const _SyllabusCard({required this.subject, required this.onToggleChapter, required this.onDelete});
+
+  @override
+  State<_SyllabusCard> createState() => _SyllabusCardState();
+}
+
+class _SyllabusCardState extends State<_SyllabusCard> {
+  bool _expanded = false;
+
+  String get _progressMessage {
+    final p = widget.subject.progress;
+    if (p >= 1.0) return '🎉 Syllabus complete!';
+    if (p >= 0.75) return '🔥 Almost done — final stretch!';
+    if (p >= 0.5) return '💪 Halfway through!';
+    if (p > 0) return '🌱 Making progress...';
+    return '📚 Ready to start';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sub = widget.subject;
+    final pct = (sub.progress * 100).round();
+
+    return Dismissible(
+      key: Key('syl-${sub.name}-${sub.createdAt.millisecondsSinceEpoch}'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => widget.onDelete(),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        margin: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFD96060),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
+      ),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(24, 0, 24, 10),
+        decoration: BoxDecoration(
+          color: CeladonColors.pageWhite,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: sub.color.withAlpha(100)),
+          boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 8, offset: Offset(0, 3))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header (tappable to expand)
+            GestureDetector(
+              onTap: () => setState(() => _expanded = !_expanded),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 5, height: 22,
+                          decoration: BoxDecoration(color: sub.color, borderRadius: BorderRadius.circular(3)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(sub.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown)),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: sub.color.withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${sub.completedCount}/${sub.chapters.length}',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: sub.color),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        AnimatedRotation(
+                          turns: _expanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          child: Icon(Icons.keyboard_arrow_down_rounded, size: 20, color: CeladonColors.mutedSage),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // Progress bar
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: sub.progress,
+                        minHeight: 5,
+                        backgroundColor: CeladonColors.ruleLine,
+                        valueColor: AlwaysStoppedAnimation(sub.color),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          _progressMessage,
+                          style: TextStyle(fontSize: 10, color: sub.color, fontWeight: FontWeight.w500),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '$pct% · ${sub.totalDays} days',
+                          style: const TextStyle(fontSize: 10, color: CeladonColors.mutedSage),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Expanded day-by-day roadmap
+            if (_expanded) ...[
+              Container(height: 1, color: CeladonColors.ruleLine),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Group chapters by assigned day
+                    for (int day = 1; day <= sub.totalDays; day++)
+                      if (sub.chapters.any((c) => c.assignedDay == day))
+                        _DayGroup(
+                          day: day,
+                          isCurrent: day == sub.currentDay,
+                          chapters: sub.chapters.where((c) => c.assignedDay == day).toList(),
+                          allChapters: sub.chapters,
+                          color: sub.color,
+                          onToggle: (ch) {
+                            final idx = sub.chapters.indexOf(ch);
+                            if (idx >= 0) widget.onToggleChapter(idx);
+                          },
+                        ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── DAY GROUP ────────────────────────────────────────────────────────────────
+
+class _DayGroup extends StatelessWidget {
+  final int day;
+  final bool isCurrent;
+  final List<_SyllabusChapter> chapters;
+  final List<_SyllabusChapter> allChapters;
+  final Color color;
+  final void Function(_SyllabusChapter ch) onToggle;
+
+  const _DayGroup({
+    required this.day,
+    required this.isCurrent,
+    required this.chapters,
+    required this.allChapters,
+    required this.color,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final allDone = chapters.every((c) => c.isDone);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Day pill
+          Container(
+            width: 44,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: isCurrent ? color : (allDone ? color.withAlpha(20) : CeladonColors.cream),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: isCurrent ? color : CeladonColors.ruleLine),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  'Day',
+                  style: TextStyle(fontSize: 8, color: isCurrent ? Colors.white70 : CeladonColors.mutedSage),
+                ),
+                Text(
+                  '$day',
+                  style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700,
+                    color: isCurrent ? Colors.white : (allDone ? color : CeladonColors.inkBrown),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          // Chapter list for this day
+          Expanded(
+            child: Column(
+              children: chapters.map((ch) {
+                return GestureDetector(
+                  onTap: () => onToggle(ch),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: ch.isDone ? color.withAlpha(15) : CeladonColors.cream,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: ch.isDone ? color.withAlpha(60) : CeladonColors.ruleLine),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 16, height: 16,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: ch.isDone ? color : Colors.transparent,
+                            border: Border.all(color: ch.isDone ? color : CeladonColors.mutedSage, width: 1.5),
+                          ),
+                          child: ch.isDone ? const Icon(Icons.check_rounded, size: 9, color: Colors.white) : null,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                ch.title,
+                                style: TextStyle(
+                                  fontSize: 11.5, fontWeight: FontWeight.w600,
+                                  color: ch.isDone ? CeladonColors.mutedSage : CeladonColors.inkBrown,
+                                  decoration: ch.isDone ? TextDecoration.lineThrough : null,
+                                  decorationColor: CeladonColors.mutedSage,
+                                ),
+                              ),
+                              if (ch.description.isNotEmpty)
+                                Text(
+                                  ch.description,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 9.5, color: CeladonColors.mutedSage),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }
