@@ -5,10 +5,15 @@ import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'firebase_options.dart';
 import 'secrets.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -234,6 +239,28 @@ class Task {
     );
   }
 
+  /// Serialize to Firestore.
+  Map<String, dynamic> toFirestore() => {
+    'id': id,
+    'title': title,
+    'subject': subject,
+    'isDone': isDone,
+    'priority': priority.index,
+    'dueDate': dueDate?.millisecondsSinceEpoch,
+    'completedAt': completedAt?.millisecondsSinceEpoch,
+  };
+
+  /// Deserialize from Firestore.
+  factory Task.fromFirestore(Map<String, dynamic> m) => Task(
+    id: m['id'] as String,
+    title: m['title'] as String,
+    subject: m['subject'] as String,
+    isDone: (m['isDone'] as bool?) ?? false,
+    priority: Priority.values[(m['priority'] as int?) ?? 1],
+    dueDate: m['dueDate'] != null ? DateTime.fromMillisecondsSinceEpoch(m['dueDate'] as int) : null,
+    completedAt: m['completedAt'] != null ? DateTime.fromMillisecondsSinceEpoch(m['completedAt'] as int) : null,
+  );
+
   /// True when done AND completed more than 24 h ago.
   bool get isExpiredCompleted {
     if (!isDone || completedAt == null) return false;
@@ -287,19 +314,42 @@ class CalendarState extends ChangeNotifier {
   DayEvent? eventFor(DateTime d) => _events[_key(d)];
 
   void setEvent(DateTime d, DayEvent event) {
-    _events[_key(d)] = event;
+    final k = _key(d);
+    _events[k] = event;
     notifyListeners();
+    // Persist to Firestore (fire-and-forget)
+    _Db.saveCalendarEvent(k, {
+      'key': k,
+      'type': event.type.index,
+      'customLabel': event.customLabel,
+    }).catchError((_) {});
   }
 
   void clearEvent(DateTime d) {
-    _events.remove(_key(d));
+    final k = _key(d);
+    _events.remove(k);
     notifyListeners();
+    _Db.deleteCalendarEvent(k).catchError((_) {});
   }
 
   DateTime get focusedMonth => _focusedMonth;
   void setFocusedMonth(DateTime m) {
     _focusedMonth = m;
     notifyListeners();
+  }
+
+  /// Load all events from Firestore for this user.
+  Future<void> loadFromFirestore() async {
+    try {
+      final raw = await _Db.loadCalendarEvents();
+      for (final m in raw) {
+        final k = m['key'] as String;
+        final type = DayType.values[(m['type'] as int?) ?? 0];
+        final label = m['customLabel'] as String?;
+        _events[k] = DayEvent(type: type, customLabel: label);
+      }
+      notifyListeners();
+    } catch (_) {}
   }
 }
 
@@ -329,36 +379,127 @@ bool _isThisMonth(DateTime? date) {
   return date.year == now.year && date.month == now.month;
 }
 
-// ── In-memory auth store (email → password)
-// Persists for the app session. Signing up registers the user;
-// logging in checks the store.
-class _AuthStore {
-  _AuthStore._();
-  static final instance = _AuthStore._();
-  final Map<String, String> _users = {};
+// ── Firebase Auth wrapper (replaces in-memory _AuthStore)
+class _AuthService {
+  _AuthService._();
+  static final instance = _AuthService._();
 
-  /// Returns null on success, error string on failure.
-  String? signUp(String email, String password) {
-    final key = email.toLowerCase().trim();
-    if (_users.containsKey(key)) return 'Account already exists. Please sign in.';
-    _users[key] = password;
-    return null;
+  final _auth = FirebaseAuth.instance;
+
+  User? get currentUser => _auth.currentUser;
+
+  /// Returns null on success, human-readable error on failure.
+  Future<String?> signUp(String email, String password) async {
+    try {
+      await _auth.createUserWithEmailAndPassword(email: email.trim(), password: password);
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _friendlyError(e.code);
+    }
   }
 
-  /// Returns null on success, error string on failure.
-  String? signIn(String email, String password) {
-    final key = email.toLowerCase().trim();
-    if (!_users.containsKey(key)) return 'No account found. Please sign up first.';
-    if (_users[key] != password) return 'Incorrect password. Please try again.';
-    return null;
+  Future<String?> signIn(String email, String password) async {
+    try {
+      await _auth.signInWithEmailAndPassword(email: email.trim(), password: password);
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _friendlyError(e.code);
+    }
   }
 
-  /// Returns null on success, error string on failure.
-  String? resetPassword(String email, String newPassword) {
-    final key = email.toLowerCase().trim();
-    if (!_users.containsKey(key)) return 'Account not found.';
-    _users[key] = newPassword;
-    return null;
+  Future<String?> resetPassword(String newPassword) async {
+    try {
+      await _auth.currentUser!.updatePassword(newPassword);
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return _friendlyError(e.code);
+    }
+  }
+
+  Future<void> logout() => _auth.signOut();
+
+  String _friendlyError(String code) {
+    switch (code) {
+      case 'email-already-in-use':    return 'Account already exists. Please sign in.';
+      case 'user-not-found':          return 'No account found. Please sign up first.';
+      case 'wrong-password':          return 'Incorrect password. Please try again.';
+      case 'invalid-email':           return 'Enter a valid email address.';
+      case 'weak-password':           return 'Password is too weak (min 6 characters).';
+      case 'requires-recent-login':   return 'Please log out and log in again before changing your password.';
+      case 'invalid-credential':      return 'Incorrect email or password.';
+      default:                        return 'Something went wrong ($code). Please try again.';
+    }
+  }
+}
+
+// ── Firestore helpers
+class _Db {
+  static FirebaseFirestore get db => FirebaseFirestore.instance;
+  static String get uid => FirebaseAuth.instance.currentUser!.uid;
+
+  static DocumentReference get _userDoc => db.collection('users').doc(uid);
+
+  // ── prefs
+  static Future<void> savePrefs(Map<String, dynamic> data) =>
+      _userDoc.set({'prefs': data}, SetOptions(merge: true));
+
+  static Future<Map<String, dynamic>> loadPrefs() async {
+    final snap = await _userDoc.get();
+    if (!snap.exists) return {};
+    final d = snap.data() as Map<String, dynamic>?;
+    return (d?['prefs'] as Map<String, dynamic>?) ?? {};
+  }
+
+  // ── tasks
+  static CollectionReference get _tasks => _userDoc.collection('tasks');
+
+  static Future<void> saveTask(Map<String, dynamic> data) =>
+      _tasks.doc(data['id'] as String).set(data);
+
+  static Future<void> deleteTask(String id) => _tasks.doc(id).delete();
+
+  static Future<List<Map<String, dynamic>>> loadTasks() async {
+    final snap = await _tasks.get();
+    return snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+  }
+
+  // ── study subjects
+  static CollectionReference get _studySubjects => _userDoc.collection('study_subjects');
+
+  static Future<void> saveStudySubject(Map<String, dynamic> data) =>
+      _studySubjects.doc(data['name'] as String).set(data);
+
+  static Future<void> deleteStudySubject(String name) => _studySubjects.doc(name).delete();
+
+  static Future<List<Map<String, dynamic>>> loadStudySubjects() async {
+    final snap = await _studySubjects.get();
+    return snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+  }
+
+  // ── syllabus subjects
+  static CollectionReference get _syllabusSubjects => _userDoc.collection('syllabus_subjects');
+
+  static Future<void> saveSyllabusSubject(String id, Map<String, dynamic> data) =>
+      _syllabusSubjects.doc(id).set(data);
+
+  static Future<void> deleteSyllabusSubject(String id) => _syllabusSubjects.doc(id).delete();
+
+  static Future<List<Map<String, dynamic>>> loadSyllabusSubjects() async {
+    final snap = await _syllabusSubjects.get();
+    return snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+  }
+
+  // ── calendar events
+  static CollectionReference get _calendarEvents => _userDoc.collection('calendar_events');
+
+  static Future<void> saveCalendarEvent(String key, Map<String, dynamic> data) =>
+      _calendarEvents.doc(key).set(data);
+
+  static Future<void> deleteCalendarEvent(String key) => _calendarEvents.doc(key).delete();
+
+  static Future<List<Map<String, dynamic>>> loadCalendarEvents() async {
+    final snap = await _calendarEvents.get();
+    return snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
   }
 }
 
@@ -430,18 +571,20 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     _coverCtrl.forward();
   }
 
-  void _submit() {
+  void _submit() async {
     setState(() => _error = null);
     if (!_formKey.currentState!.validate()) return;
     final email    = _emailCtrl.text.trim();
     final password = _passCtrl.text;
-    final store    = _AuthStore.instance;
-    final err      = _isSignUp ? store.signUp(email, password) : store.signIn(email, password);
+    final svc      = _AuthService.instance;
+    final err      = _isSignUp
+        ? await svc.signUp(email, password)
+        : await svc.signIn(email, password);
     if (err != null) {
       setState(() => _error = err);
       return;
     }
-    Navigator.of(context).pushReplacementNamed('/main', arguments: email);
+    // Navigation is handled reactively by StreamBuilder in CeladonApp
   }
 
   @override
@@ -1175,13 +1318,36 @@ class _AppState extends ChangeNotifier {
   static final instance = _AppState._();
 
   String userEmail = '';
-  Uint8List? profileBytes;  // raw image bytes for pfp
+  Uint8List? profileBytes;  // local bytes for display; no remote storage on free plan
   bool darkMode = false;
 
-  void setEmail(String e)       { userEmail = e; notifyListeners(); }
+  void setEmail(String e) { userEmail = e; notifyListeners(); }
   void setProfile(Uint8List? b) { profileBytes = b; notifyListeners(); }
-  void toggleDark()             { darkMode = !darkMode; notifyListeners(); }
-  void logout()                 { userEmail = ''; profileBytes = null; notifyListeners(); }
+
+  void toggleDark() {
+    darkMode = !darkMode;
+    notifyListeners();
+    // Persist to Firestore (fire-and-forget)
+    if (userEmail.isNotEmpty) {
+      _Db.savePrefs({'darkMode': darkMode}).catchError((_) {});
+    }
+  }
+
+  Future<void> loadPrefs() async {
+    try {
+      final prefs = await _Db.loadPrefs();
+      darkMode = (prefs['darkMode'] as bool?) ?? false;
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  void logout() {
+    userEmail    = '';
+    profileBytes = null;
+    darkMode     = false;
+    notifyListeners();
+    _AuthService.instance.logout();
+  }
 }
 
 // ─── APP ROOT ────────────────────────────────────────────────────────────────
@@ -1194,15 +1360,25 @@ class CeladonApp extends StatefulWidget {
 
 class _CeladonAppState extends State<CeladonApp> {
   final _appState = _AppState.instance;
+  late final StreamSubscription<User?> _authSub;
 
   @override
   void initState() {
     super.initState();
     _appState.addListener(_onStateChange);
+    // Listen for Firebase auth state — handles auto-login and logout
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user != null) {
+        _appState.setEmail(user.email ?? '');
+        _appState.loadPrefs();  // load dark mode pref from Firestore
+      }
+      setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _authSub.cancel();
     _appState.removeListener(_onStateChange);
     super.dispose();
   }
@@ -1232,13 +1408,37 @@ class _CeladonAppState extends State<CeladonApp> {
   @override
   Widget build(BuildContext context) {
     final dark = _appState.darkMode;
+
     return MaterialApp(
       title: 'Celadon',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(false),
       darkTheme: _buildTheme(true),
       themeMode: dark ? ThemeMode.dark : ThemeMode.light,
-      home: const LoginScreen(),
+      // StreamBuilder reacts to login/logout in real-time
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (ctx, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              backgroundColor: CeladonColors.cream,
+              body: Center(child: CircularProgressIndicator(color: CeladonColors.sage)),
+            );
+          }
+          final user = snap.data;
+          if (user != null) {
+            // Keep AppState in sync with current user
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_appState.userEmail.isEmpty) {
+                _appState.setEmail(user.email ?? '');
+                _appState.loadPrefs();
+              }
+            });
+            return _CalendarStateProvider(child: const MainShell());
+          }
+          return const LoginScreen();
+        },
+      ),
       onGenerateRoute: (settings) {
         if (settings.name == '/main') {
           final email = settings.arguments as String? ?? '';
@@ -1264,6 +1464,13 @@ class _CalendarStateProvider extends StatefulWidget {
 
 class _CalendarStateProviderState extends State<_CalendarStateProvider> {
   final CalendarState _state = CalendarState();
+
+  @override
+  void initState() {
+    super.initState();
+    // Load calendar events from Firestore for the current user
+    _state.loadFromFirestore();
+  }
 
   @override
   void dispose() {
@@ -2328,13 +2535,14 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
     }
   }
 
-  void _doResetPassword() {
+  void _doResetPassword() async {
     final np = _newPassCtrl.text;
     final cp = _confirmCtrl.text;
     setState(() { _resetError = null; _resetSuccess = null; });
     if (np.length <= 5) { setState(() => _resetError = 'Password must be more than 5 characters'); return; }
     if (np != cp)       { setState(() => _resetError = 'Passwords do not match'); return; }
-    final err = _AuthStore.instance.resetPassword(_appState.userEmail, np);
+    final err = await _AuthService.instance.resetPassword(np);
+    if (!mounted) return;
     if (err != null) { setState(() => _resetError = err); return; }
     setState(() { _resetSuccess = 'Password updated ✔'; _resetting = false; });
     _newPassCtrl.clear(); _confirmCtrl.clear();
@@ -2492,18 +2700,15 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
 
           Divider(color: rule, height: 1),
 
-          // ── Logout
           _SheetTile(
             icon: Icons.logout_rounded,
             label: 'Log Out',
             color: const Color(0xFFD96060),
             fg: const Color(0xFFD96060),
-            onTap: () {
-              _appState.logout();
-              Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-              );
+            onTap: () async {
+              Navigator.pop(context);
+              _appState.logout();  // also calls FirebaseAuth.signOut()
+              // authStateChanges in CeladonApp will rebuild to LoginScreen
             },
           ),
         ],
@@ -2577,48 +2782,41 @@ class TodayScreen extends StatefulWidget {
 }
 
 class _TodayScreenState extends State<TodayScreen> {
-  final List<Task> _tasks = [
-    Task(
-      id: '1', title: 'Read Chapter 7 — Organic Chem',
-      subject: 'Chemistry', priority: Priority.high,
-      dueDate: DateTime.now(),
-    ),
-    Task(
-      id: '2', title: 'Complete Math problem set',
-      subject: 'Mathematics', isDone: true, priority: Priority.medium,
-      dueDate: DateTime.now(), completedAt: DateTime.now(),
-    ),
-    Task(
-      id: '3', title: 'Write essay draft',
-      subject: 'English Lit', priority: Priority.medium,
-      dueDate: DateTime.now(),
-    ),
-    Task(
-      id: '4', title: 'Review lecture notes',
-      subject: 'Physics', priority: Priority.low,
-      dueDate: DateTime.now().add(const Duration(days: 2)),
-    ),
-    Task(
-      id: '5', title: 'Prepare for quiz',
-      subject: 'History', priority: Priority.high,
-      dueDate: DateTime.now().add(const Duration(days: 5)),
-    ),
-    Task(
-      id: '6', title: 'Chapter 9 summary',
-      subject: 'History', priority: Priority.medium,
-      dueDate: DateTime.now().add(const Duration(days: 20)),
-    ),
-  ];
-
+  final List<Task> _tasks = [];
+  bool _loading = true;
   Timer? _cleanupTimer;
 
   @override
   void initState() {
     super.initState();
-    // Auto-prune completed tasks after 24 h
+    _loadTasks();
     _cleanupTimer = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() => _tasks.removeWhere((t) => t.isExpiredCompleted));
+      if (mounted) {
+        final expired = _tasks.where((t) => t.isExpiredCompleted).map((t) => t.id).toList();
+        for (final id in expired) {
+          _Db.deleteTask(id).catchError((_) {});
+        }
+        setState(() => _tasks.removeWhere((t) => t.isExpiredCompleted));
+      }
     });
+  }
+
+  Future<void> _loadTasks() async {
+    try {
+      final raw = await _Db.loadTasks();
+      final tasks = raw.map(Task.fromFirestore).toList();
+      // Remove expired tasks
+      final expired = tasks.where((t) => t.isExpiredCompleted).map((t) => t.id).toList();
+      for (final id in expired) { _Db.deleteTask(id).catchError((_) {}); }
+      if (mounted) setState(() {
+        _tasks
+          ..clear()
+          ..addAll(tasks.where((t) => !t.isExpiredCompleted));
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -2644,21 +2842,22 @@ class _TodayScreenState extends State<TodayScreen> {
 
   // ── Actions ───────────────────────────────────────────────────────────────
   void _toggleTask(String id) {
-    setState(() {
-      final idx = _tasks.indexWhere((t) => t.id == id);
-      if (idx == -1) return;
-      final task = _tasks[idx];
-      final nowDone = !task.isDone;
-      _tasks[idx] = Task(
-        id: task.id, title: task.title, subject: task.subject,
-        isDone: nowDone, priority: task.priority, dueDate: task.dueDate,
-        completedAt: nowDone ? DateTime.now() : null,
-      );
-    });
+    final idx = _tasks.indexWhere((t) => t.id == id);
+    if (idx == -1) return;
+    final task = _tasks[idx];
+    final nowDone = !task.isDone;
+    final updated = Task(
+      id: task.id, title: task.title, subject: task.subject,
+      isDone: nowDone, priority: task.priority, dueDate: task.dueDate,
+      completedAt: nowDone ? DateTime.now() : null,
+    );
+    setState(() => _tasks[idx] = updated);
+    _Db.saveTask(updated.toFirestore()).catchError((_) {});
   }
 
   void _deleteTask(String id) {
     setState(() => _tasks.removeWhere((t) => t.id == id));
+    _Db.deleteTask(id).catchError((_) {});
   }
 
   void _showAddSheet() {
@@ -2668,15 +2867,13 @@ class _TodayScreenState extends State<TodayScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => _AddTaskSheet(
         onAdd: (title, subject, priority, dueDate) {
-          setState(() {
-            _tasks.add(Task(
-              id: DateTime.now().millisecondsSinceEpoch.toString(),
-              title: title,
-              subject: subject,
-              priority: priority,
-              dueDate: dueDate,
-            ));
-          });
+          final newTask = Task(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            title: title, subject: subject,
+            priority: priority, dueDate: dueDate,
+          );
+          setState(() => _tasks.add(newTask));
+          _Db.saveTask(newTask.toFirestore()).catchError((_) {});
           Navigator.pop(ctx);
         },
       ),
@@ -2685,6 +2882,12 @@ class _TodayScreenState extends State<TodayScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: CeladonColors.cream,
+        body: Center(child: CircularProgressIndicator(color: CeladonColors.sage)),
+      );
+    }
     final now = DateTime.now();
     final todayAll = _tasks.where((t) => _isToday(t.dueDate)).toList();
     final todayDone = todayAll.where((t) => t.isDone).length;
@@ -3814,6 +4017,20 @@ class _SubjectStudy {
     this.goalHours = 1.0,
     this.actualHours = 0.0,
   });
+
+  Map<String, dynamic> toMap() => {
+    'name': name,
+    'colorValue': color.toARGB32(),
+    'goalHours': goalHours,
+    'actualHours': actualHours,
+  };
+
+  factory _SubjectStudy.fromMap(Map<String, dynamic> m) => _SubjectStudy(
+    name: m['name'] as String,
+    color: Color(m['colorValue'] as int),
+    goalHours: (m['goalHours'] as num).toDouble(),
+    actualHours: (m['actualHours'] as num).toDouble(),
+  );
 }
 
 class StudyScreen extends StatefulWidget {
@@ -3826,14 +4043,36 @@ class StudyScreen extends StatefulWidget {
 class _StudyScreenState extends State<StudyScreen> {
   double _totalGoal = 6.0;
   double _totalActual = 0.0;
+  bool _loading = true;
 
-  final List<_SubjectStudy> _subjects = [
-    _SubjectStudy(name: 'Mathematics', color: const Color(0xFF7C9A7E), goalHours: 1.5, actualHours: 1.0),
-    _SubjectStudy(name: 'Chemistry', color: const Color(0xFFD4956A), goalHours: 1.0, actualHours: 0.5),
-    _SubjectStudy(name: 'Physics', color: const Color(0xFF6A8FA0), goalHours: 1.0, actualHours: 1.2),
-    _SubjectStudy(name: 'English Lit', color: const Color(0xFF9B8EA0), goalHours: 1.0, actualHours: 0.0),
-    _SubjectStudy(name: 'History', color: const Color(0xFFA09B6A), goalHours: 1.0, actualHours: 0.0),
-  ];
+  final List<_SubjectStudy> _subjects = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSubjects();
+  }
+
+  Future<void> _loadSubjects() async {
+    try {
+      final results = await Future.wait([
+        _Db.loadStudySubjects(),
+        _Db.loadPrefs(),
+      ]);
+      final raw = results[0] as List<Map<String, dynamic>>;
+      final prefs = results[1] as Map<String, dynamic>;
+      if (mounted) setState(() {
+        _subjects
+          ..clear()
+          ..addAll(raw.map(_SubjectStudy.fromMap));
+        _totalGoal = (prefs['studyGoalHours'] as num?)?.toDouble() ?? 6.0;
+        _syncTotalFromSubjects();
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   // ── Derived ───────────────────────────────────────────────────────────────
   double get _subjectGoalSum => _subjects.fold(0.0, (s, e) => s + e.goalHours);
@@ -3974,7 +4213,10 @@ class _StudyScreenState extends State<StudyScreen> {
                               GestureDetector(
                                 onTap: () async {
                                   final v = await _editNumber('Daily Study Goal', _totalGoal);
-                                  if (v != null) setState(() => _totalGoal = v);
+                                  if (v != null) {
+                                    setState(() => _totalGoal = v);
+                                    _Db.savePrefs({'studyGoalHours': v}).catchError((_) {});
+                                  }
                                 },
                                 child: _HourRow(
                                   label: 'Goal',
@@ -4065,13 +4307,23 @@ class _StudyScreenState extends State<StudyScreen> {
                     study: _subjects[i],
                     onGoalTap: () async {
                       final v = await _editNumber('${_subjects[i].name} — Goal', _subjects[i].goalHours);
-                      if (v != null) setState(() { _subjects[i].goalHours = v; _syncTotalFromSubjects(); });
+                      if (v != null) {
+                        setState(() { _subjects[i].goalHours = v; _syncTotalFromSubjects(); });
+                        _Db.saveStudySubject(_subjects[i].toMap()).catchError((_) {});
+                      }
                     },
                     onActualTap: () async {
                       final v = await _editNumber('${_subjects[i].name} — Studied', _subjects[i].actualHours);
-                      if (v != null) setState(() { _subjects[i].actualHours = v; _syncTotalFromSubjects(); });
+                      if (v != null) {
+                        setState(() { _subjects[i].actualHours = v; _syncTotalFromSubjects(); });
+                        _Db.saveStudySubject(_subjects[i].toMap()).catchError((_) {});
+                      }
                     },
-                    onDelete: () => setState(() { _subjects.removeAt(i); _syncTotalFromSubjects(); }),
+                    onDelete: () {
+                      final name = _subjects[i].name;
+                      setState(() { _subjects.removeAt(i); _syncTotalFromSubjects(); });
+                      _Db.deleteStudySubject(name).catchError((_) {});
+                    },
                   ),
                   childCount: _subjects.length,
                 ),
@@ -4115,17 +4367,16 @@ class _StudyScreenState extends State<StudyScreen> {
       ),
     );
     if (name != null && name.isNotEmpty) {
-      // Cycle through a palette for new subjects
       const palette = [
         Color(0xFF7C9A7E), Color(0xFFD4956A), Color(0xFF6A8FA0),
         Color(0xFF9B8EA0), Color(0xFFA09B6A), Color(0xFFB07878),
       ];
-      setState(() {
-        _subjects.add(_SubjectStudy(
-          name: name,
-          color: palette[_subjects.length % palette.length],
-        ));
-      });
+      final newSubject = _SubjectStudy(
+        name: name,
+        color: palette[_subjects.length % palette.length],
+      );
+      setState(() => _subjects.add(newSubject));
+      _Db.saveStudySubject(newSubject.toMap()).catchError((_) {});
     }
   }
 }
