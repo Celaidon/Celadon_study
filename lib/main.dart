@@ -329,27 +329,927 @@ bool _isThisMonth(DateTime? date) {
   return date.year == now.year && date.month == now.month;
 }
 
-// ─── APP ROOT ────────────────────────────────────────────────────────────────
+// ── In-memory auth store (email → password)
+// Persists for the app session. Signing up registers the user;
+// logging in checks the store.
+class _AuthStore {
+  _AuthStore._();
+  static final instance = _AuthStore._();
+  final Map<String, String> _users = {};
 
-class CeladonApp extends StatelessWidget {
-  const CeladonApp({super.key});
+  /// Returns null on success, error string on failure.
+  String? signUp(String email, String password) {
+    final key = email.toLowerCase().trim();
+    if (_users.containsKey(key)) return 'Account already exists. Please sign in.';
+    _users[key] = password;
+    return null;
+  }
+
+  /// Returns null on success, error string on failure.
+  String? signIn(String email, String password) {
+    final key = email.toLowerCase().trim();
+    if (!_users.containsKey(key)) return 'No account found. Please sign up first.';
+    if (_users[key] != password) return 'Incorrect password. Please try again.';
+    return null;
+  }
+
+  /// Returns null on success, error string on failure.
+  String? resetPassword(String email, String newPassword) {
+    final key = email.toLowerCase().trim();
+    if (!_users.containsKey(key)) return 'Account not found.';
+    _users[key] = newPassword;
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── LOGIN SCREEN ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin {
+  // ── Controllers
+  final _emailCtrl    = TextEditingController();
+  final _passCtrl     = TextEditingController();
+  final _formKey      = GlobalKey<FormState>();
+  bool _isSignUp      = false;
+  bool _obscure       = true;
+  String? _error;
+
+  // ── Cover open animation
+  late final AnimationController _coverCtrl;
+  late final Animation<double>    _coverAngle;   // 0 → -π/2 (cover swings open)
+  late final Animation<double>    _formFade;
+
+  // ── Floating dust-motes
+  late final AnimationController _dustCtrl;
+  final List<_DustMote> _motes = List.generate(18, (i) => _DustMote(i));
+
+  // ── Clasp pulse
+  late final AnimationController _claspCtrl;
+  late final Animation<double>   _claspPulse;
+
+  bool _coverOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _coverCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _coverAngle = Tween<double>(begin: 0, end: -math.pi / 2)
+        .animate(CurvedAnimation(parent: _coverCtrl, curve: Curves.easeInOut));
+    _formFade = Tween<double>(begin: 0, end: 1)
+        .animate(CurvedAnimation(parent: _coverCtrl, curve: const Interval(0.5, 1.0, curve: Curves.easeOut)));
+
+    _dustCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 8))
+      ..repeat();
+
+    _claspCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
+      ..repeat(reverse: true);
+    _claspPulse = Tween<double>(begin: 0.85, end: 1.0)
+        .animate(CurvedAnimation(parent: _claspCtrl, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    _coverCtrl.dispose();
+    _dustCtrl.dispose();
+    _claspCtrl.dispose();
+    super.dispose();
+  }
+
+  void _openCover() {
+    setState(() => _coverOpen = true);
+    _coverCtrl.forward();
+  }
+
+  void _submit() {
+    setState(() => _error = null);
+    if (!_formKey.currentState!.validate()) return;
+    final email    = _emailCtrl.text.trim();
+    final password = _passCtrl.text;
+    final store    = _AuthStore.instance;
+    final err      = _isSignUp ? store.signUp(email, password) : store.signIn(email, password);
+    if (err != null) {
+      setState(() => _error = err);
+      return;
+    }
+    Navigator.of(context).pushReplacementNamed('/main', arguments: email);
+  }
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF2A1505), Color(0xFF3E1F08), Color(0xFF5C2E0A), Color(0xFF3A1A04)],
+            stops: [0.0, 0.35, 0.7, 1.0],
+          ),
+        ),
+        child: Stack(
+          children: [
+            // ── Leather texture overlay
+            CustomPaint(painter: _LeatherTexturePainter(), child: const SizedBox.expand()),
+
+            // ── Floating dust motes
+            AnimatedBuilder(
+              animation: _dustCtrl,
+              builder: (_, __) => CustomPaint(
+                painter: _DustPainter(_motes, _dustCtrl.value),
+                child: const SizedBox.expand(),
+              ),
+            ),
+
+            // ── Decorative ruled lines on outside (faint)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(painter: _FaintLinesPainter()),
+              ),
+            ),
+
+            // ── Corner embossing (golden)
+            const Positioned(top: 20, left: 20,  child: _CornerEmboss()),
+            const Positioned(top: 20, right: 20, child: _CornerEmboss(flip: true)),
+            const Positioned(bottom: 20, left: 20,  child: _CornerEmboss(bottom: true)),
+            const Positioned(bottom: 20, right: 20, child: _CornerEmboss(flip: true, bottom: true)),
+
+            // ── Book spine (left edge)
+            Positioned(
+              left: 0, top: 0, bottom: 0,
+              child: Container(
+                width: 28,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft, end: Alignment.centerRight,
+                    colors: [Color(0xFF1A0C02), Color(0xFF4A2208)],
+                  ),
+                ),
+                child: RotatedBox(
+                  quarterTurns: 3,
+                  child: Center(
+                    child: Text(
+                      'C E L A D O N',
+                      style: TextStyle(
+                        fontSize: 9, letterSpacing: 4,
+                        color: const Color(0xFFD4A84B).withAlpha(160),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Main content area (cover → form) — fills entire screen
+            Positioned.fill(
+              child: AnimatedBuilder(
+                animation: _coverCtrl,
+                builder: (_, __) {
+                  return Stack(
+                    children: [
+                      // Form (behind cover, revealed as cover swings)
+                      if (_coverOpen)
+                        FadeTransition(
+                          opacity: _formFade,
+                          child: _LoginForm(
+                            formKey: _formKey,
+                            emailCtrl: _emailCtrl,
+                            passCtrl: _passCtrl,
+                            isSignUp: _isSignUp,
+                            obscure: _obscure,
+                            error: _error,
+                            onToggleMode: () => setState(() => _isSignUp = !_isSignUp),
+                            onToggleObscure: () => setState(() => _obscure = !_obscure),
+                            onSubmit: _submit,
+                          ),
+                        ),
+
+                      // Notebook cover (swings open like a book page)
+                      if (!_coverOpen || _coverAngle.value > -math.pi / 2 + 0.05)
+                        Transform(
+                          alignment: Alignment.centerLeft,
+                          transform: Matrix4.identity()
+                            ..setEntry(3, 2, 0.0005)
+                            ..rotateY(_coverAngle.value),
+                          child: _NotebookCoverPanel(
+                            claspPulse: _claspPulse,
+                            coverOpen: _coverOpen,
+                            onTap: _coverOpen ? null : _openCover,
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Notebook cover panel
+class _NotebookCoverPanel extends StatelessWidget {
+  final Animation<double> claspPulse;
+  final bool coverOpen;
+  final VoidCallback? onTap;
+  const _NotebookCoverPanel({required this.claspPulse, required this.coverOpen, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox.expand(
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft, end: Alignment.bottomRight,
+              colors: [Color(0xFF5C2E0A), Color(0xFF3B1E08), Color(0xFF4A2510), Color(0xFF2E1506)],
+            ),
+          ),
+        child: Stack(
+          children: [
+            // Embossed border frame
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(2),
+                    border: Border.all(color: const Color(0xFFD4A84B).withAlpha(80), width: 1),
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(2),
+                    border: Border.all(color: const Color(0xFFD4A84B).withAlpha(40), width: 0.5),
+                  ),
+                ),
+              ),
+            ),
+
+            // Title block
+            Positioned(
+              top: 60, left: 0, right: 0,
+              child: Column(
+                children: [
+                  // Decorative line
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Row(
+                      children: [
+                        Expanded(child: Container(height: 0.5, color: const Color(0xFFD4A84B).withAlpha(100))),
+                        const SizedBox(width: 10),
+                        Icon(Icons.auto_stories_rounded, size: 14, color: const Color(0xFFD4A84B).withAlpha(180)),
+                        const SizedBox(width: 10),
+                        Expanded(child: Container(height: 0.5, color: const Color(0xFFD4A84B).withAlpha(100))),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'CELADON',
+                    style: TextStyle(
+                      fontSize: 28, letterSpacing: 10, fontWeight: FontWeight.w700,
+                      color: const Color(0xFFD4A84B).withAlpha(230),
+                      shadows: [Shadow(color: Colors.black.withAlpha(120), blurRadius: 8)],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Study Companion',
+                    style: TextStyle(
+                      fontSize: 11, letterSpacing: 3,
+                      color: const Color(0xFFD4A84B).withAlpha(140),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Row(
+                      children: [
+                        Expanded(child: Container(height: 0.5, color: const Color(0xFFD4A84B).withAlpha(100))),
+                        const SizedBox(width: 10),
+                        Icon(Icons.stars_rounded, size: 10, color: const Color(0xFFD4A84B).withAlpha(180)),
+                        const SizedBox(width: 10),
+                        Expanded(child: Container(height: 0.5, color: const Color(0xFFD4A84B).withAlpha(100))),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Pen/pencil illustration (simple)
+            Positioned(
+              bottom: 90, left: 0, right: 0,
+              child: CustomPaint(painter: _PenIllustrationPainter(), child: const SizedBox(height: 60)),
+            ),
+
+            // Open me hint
+            if (!coverOpen)
+              Positioned(
+                bottom: 36, left: 0, right: 0,
+                child: Column(
+                  children: [
+                    ScaleTransition(
+                      scale: claspPulse,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: const Color(0xFFD4A84B).withAlpha(180)),
+                          borderRadius: BorderRadius.circular(20),
+                          color: const Color(0xFFD4A84B).withAlpha(18),
+                        ),
+                        child: const Text(
+                          '✦  Open  ✦',
+                          style: TextStyle(
+                            fontSize: 11, letterSpacing: 3,
+                            color: Color(0xFFD4A84B),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Login form (notebook page interior)
+class _LoginForm extends StatelessWidget {
+  final GlobalKey<FormState> formKey;
+  final TextEditingController emailCtrl;
+  final TextEditingController passCtrl;
+  final bool isSignUp;
+  final bool obscure;
+  final String? error;
+  final VoidCallback onToggleMode;
+  final VoidCallback onToggleObscure;
+  final VoidCallback onSubmit;
+
+  const _LoginForm({
+    required this.formKey, required this.emailCtrl, required this.passCtrl,
+    required this.isSignUp, required this.obscure, this.error,
+    required this.onToggleMode, required this.onToggleObscure, required this.onSubmit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.expand(
+      child: Stack(
+        children: [
+          // Ruled lines background
+          CustomPaint(painter: _RuledPagePainter(), child: const SizedBox.expand()),
+
+          // Red margin line
+          const Positioned(
+            left: 48, top: 0, bottom: 0,
+            child: VerticalDivider(width: 1, color: Color(0x50E8A0A0)),
+          ),
+
+          // Spiral holes
+          const Positioned(
+            left: 0, top: 0, bottom: 0,
+            child: SizedBox(
+              width: 24,
+              child: _SpiralHolesWidget(),
+            ),
+          ),
+
+          // Centered form content
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(60, 40, 32, 32),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header
+                      Text(
+                        isSignUp ? 'New Entry' : 'Welcome Back',
+                        style: const TextStyle(
+                          fontSize: 26, fontWeight: FontWeight.w700,
+                          color: CeladonColors.inkBrown,
+                        ),
+                      ),
+                      Text(
+                        isSignUp ? 'Create your account' : 'Sign in to continue',
+                        style: const TextStyle(fontSize: 12, color: CeladonColors.mutedSage),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // Email
+                      _NotebookField(
+                        controller: emailCtrl,
+                        label: 'Email',
+                        icon: Icons.mail_outline_rounded,
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Email required';
+                          if (!v.contains('@')) return 'Enter a valid email';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Password
+                      _NotebookField(
+                        controller: passCtrl,
+                        label: 'Password',
+                        icon: Icons.lock_outline_rounded,
+                        obscure: obscure,
+                        suffix: GestureDetector(
+                          onTap: onToggleObscure,
+                          child: Icon(
+                            obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                            size: 16, color: CeladonColors.mutedSage,
+                          ),
+                        ),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Password required';
+                          if (v.length <= 5) return 'Must be more than 5 characters';
+                          return null;
+                        },
+                      ),
+
+                      if (error != null) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFDE8E8),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFD96060).withAlpha(80)),
+                          ),
+                          child: Text(error!, style: const TextStyle(fontSize: 11, color: Color(0xFFD96060))),
+                        ),
+                      ],
+
+                      const SizedBox(height: 28),
+
+                      // Submit button
+                      SizedBox(
+                        width: double.infinity,
+                        child: GestureDetector(
+                          onTap: onSubmit,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            decoration: BoxDecoration(
+                              color: CeladonColors.inkBrown,
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: [BoxShadow(color: CeladonColors.inkBrown.withAlpha(80), blurRadius: 8, offset: const Offset(0, 3))],
+                            ),
+                            child: Center(
+                              child: Text(
+                                isSignUp ? 'Create Account →' : 'Open My Journal →',
+                                style: const TextStyle(fontSize: 14, color: CeladonColors.cream, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      // Toggle login/signup
+                      Center(
+                        child: GestureDetector(
+                          onTap: onToggleMode,
+                          child: Text.rich(
+                            TextSpan(
+                              text: isSignUp ? 'Already have an account? ' : 'New here? ',
+                              style: const TextStyle(fontSize: 11, color: CeladonColors.mutedSage),
+                              children: [
+                                TextSpan(
+                                  text: isSignUp ? 'Sign in' : 'Sign up',
+                                  style: const TextStyle(color: CeladonColors.sage, fontWeight: FontWeight.w700),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Helper widget to avoid passing painters into const context
+class _SpiralHolesWidget extends StatelessWidget {
+  const _SpiralHolesWidget();
+  @override
+  Widget build(BuildContext context) => CustomPaint(painter: _SpiralHolesPainter());
+}
+
+// ── Notebook input field
+class _NotebookField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final bool obscure;
+  final TextInputType? keyboardType;
+  final Widget? suffix;
+  final String? Function(String?)? validator;
+
+  const _NotebookField({
+    required this.controller, required this.label, required this.icon,
+    this.obscure = false, this.keyboardType, this.suffix, this.validator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscure,
+      keyboardType: keyboardType,
+      validator: validator,
+      style: const TextStyle(fontSize: 13, color: CeladonColors.inkBrown),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(fontSize: 12, color: CeladonColors.mutedSage),
+        prefixIcon: Icon(icon, size: 16, color: CeladonColors.mutedSage),
+        suffixIcon: suffix != null ? Padding(padding: const EdgeInsets.only(right: 8), child: suffix) : null,
+        filled: true,
+        fillColor: CeladonColors.cream,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: CeladonColors.inkBrown, width: 1.5)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFD96060))),
+        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFD96060), width: 1.5)),
+        errorStyle: const TextStyle(fontSize: 9, color: Color(0xFFD96060)),
+      ),
+    );
+  }
+}
+
+// ── Welcome overlay + page-flip route
+class _WelcomeOverlay extends StatefulWidget {
+  final String userName;
+  final Widget destination;
+  const _WelcomeOverlay({required this.userName, required this.destination});
+  @override
+  State<_WelcomeOverlay> createState() => _WelcomeOverlayState();
+}
+
+class _WelcomeOverlayState extends State<_WelcomeOverlay> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<double> _slide;
+  bool _showMain = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800));
+    _fade  = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _ctrl, curve: const Interval(0.0, 0.4)));
+    _slide = Tween<double>(begin: 30, end: 0).animate(CurvedAnimation(parent: _ctrl, curve: const Interval(0.0, 0.5, curve: Curves.easeOut)));
+    _ctrl.forward().then((_) {
+      Future.delayed(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => _showMain = true);
+      });
+    });
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_showMain) return widget.destination;
+    return Scaffold(
+      backgroundColor: CeladonColors.cream,
+      body: NotebookBackground(
+        child: Center(
+          child: AnimatedBuilder(
+            animation: _ctrl,
+            builder: (_, __) => Transform.translate(
+              offset: Offset(0, _slide.value),
+              child: Opacity(
+                opacity: _fade.value,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('✦', style: TextStyle(fontSize: 28, color: CeladonColors.terracotta)),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Welcome back,',
+                      style: const TextStyle(fontSize: 14, color: CeladonColors.mutedSage, letterSpacing: 1),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.userName,
+                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Your journal is ready 📖', style: TextStyle(fontSize: 12, color: CeladonColors.mutedSage)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Page flip route (3-D Y-axis flip transition)
+class _PageFlipRoute extends PageRouteBuilder {
+  final Widget page;
+  final String userName;
+
+  _PageFlipRoute({required this.page, required this.userName})
+      : super(
+          transitionDuration: const Duration(milliseconds: 900),
+          reverseTransitionDuration: const Duration(milliseconds: 600),
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              _WelcomeOverlay(userName: userName, destination: page),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            final flip = Tween<double>(begin: math.pi / 2, end: 0).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+            );
+            return AnimatedBuilder(
+              animation: flip,
+              builder: (_, c) => Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.001)
+                  ..rotateY(flip.value),
+                child: c,
+              ),
+              child: child,
+            );
+          },
+        );
+}
+
+// ── CustomPainters ───────────────────────────────────────────────────────────
+
+class _LeatherTexturePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rng = math.Random(42);
+    final paint = Paint()..color = Colors.white.withAlpha(4);
+    for (int i = 0; i < 400; i++) {
+      final x = rng.nextDouble() * size.width;
+      final y = rng.nextDouble() * size.height;
+      final w = rng.nextDouble() * 60 + 10;
+      canvas.drawLine(Offset(x, y), Offset(x + w, y + rng.nextDouble() * 4 - 2), paint);
+    }
+  }
+  @override bool shouldRepaint(_) => false;
+}
+
+class _FaintLinesPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFFD4A84B).withAlpha(12)
+      ..strokeWidth = 0.5;
+    for (double y = 40; y < size.height; y += 24) {
+      canvas.drawLine(Offset(40, y), Offset(size.width - 40, y), paint);
+    }
+  }
+  @override bool shouldRepaint(_) => false;
+}
+
+class _RuledPagePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = CeladonColors.ruleLine
+      ..strokeWidth = 0.7;
+    for (double y = 32; y < size.height; y += 22) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+  @override bool shouldRepaint(_) => false;
+}
+
+class _SpiralHolesPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bg = Paint()..color = const Color(0xFFE8E0D0);
+    final ring = Paint()..color = const Color(0xFFB8A898)..style = PaintingStyle.stroke..strokeWidth = 1;
+    for (double y = 30; y < size.height; y += 40) {
+      canvas.drawCircle(Offset(12, y), 6, bg);
+      canvas.drawCircle(Offset(12, y), 6, ring);
+    }
+  }
+  @override bool shouldRepaint(_) => false;
+}
+
+class _PenIllustrationPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final gold = Paint()..color = const Color(0xFFD4A84B).withAlpha(140)..strokeWidth = 2..style = PaintingStyle.stroke;
+    final goldFill = Paint()..color = const Color(0xFFD4A84B).withAlpha(80);
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    // Pen body
+    final path = Path()
+      ..moveTo(cx - 60, cy - 4)
+      ..lineTo(cx + 50, cy - 4)
+      ..lineTo(cx + 50, cy + 4)
+      ..lineTo(cx - 60, cy + 4)
+      ..close();
+    canvas.drawPath(path, goldFill);
+    canvas.drawPath(path, gold);
+    // Nib
+    final nib = Path()
+      ..moveTo(cx + 50, cy - 4)
+      ..lineTo(cx + 70, cy)
+      ..lineTo(cx + 50, cy + 4)
+      ..close();
+    canvas.drawPath(nib, goldFill);
+    canvas.drawPath(nib, gold);
+    // Clip ring
+    canvas.drawRect(Rect.fromLTWH(cx - 62, cy - 7, 8, 14), goldFill);
+    canvas.drawRect(Rect.fromLTWH(cx - 62, cy - 7, 8, 14), gold);
+  }
+  @override bool shouldRepaint(_) => false;
+}
+
+class _DustMote {
+  final double x;
+  final double yBase;
+  final double size;
+  final double speed;
+  final double phase;
+  _DustMote(int seed)
+      : x     = (seed * 137.5 % 1.0),
+        yBase  = (seed * 91.3  % 1.0),
+        size   = (seed * 53.7  % 0.8) + 0.8,
+        speed  = (seed * 37.1  % 0.6) + 0.4,
+        phase  = (seed * 73.9  % 1.0);
+}
+
+class _DustPainter extends CustomPainter {
+  final List<_DustMote> motes;
+  final double t;
+  _DustPainter(this.motes, this.t);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = const Color(0xFFD4A84B).withAlpha(40);
+    for (final m in motes) {
+      final y = ((m.yBase + t * m.speed + m.phase) % 1.0) * size.height;
+      final x = m.x * size.width + math.sin(t * 2 * math.pi + m.phase * 6) * 20;
+      canvas.drawCircle(Offset(x, y), m.size, paint);
+    }
+  }
+  @override bool shouldRepaint(_DustPainter old) => old.t != t;
+}
+
+class _CornerEmboss extends StatelessWidget {
+  final bool flip;
+  final bool bottom;
+  const _CornerEmboss({this.flip = false, this.bottom = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.scale(
+      scaleX: flip ? -1 : 1,
+      scaleY: bottom ? -1 : 1,
+      child: SizedBox(
+        width: 32, height: 32,
+        child: CustomPaint(painter: _CornerPainter()),
+      ),
+    );
+  }
+}
+
+class _CornerPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = const Color(0xFFD4A84B).withAlpha(160)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(const Offset(0, 12), const Offset(0, 0), p);
+    canvas.drawLine(const Offset(0, 0), const Offset(12, 0), p);
+    canvas.drawLine(const Offset(4, 18), const Offset(4, 4), p);
+    canvas.drawLine(const Offset(4, 4), const Offset(18, 4), p);
+  }
+  @override bool shouldRepaint(_) => false;
+}
+
+// ─── APP STATE (profile, theme) ─────────────────────────────────────────────────────────
+
+class _AppState extends ChangeNotifier {
+  _AppState._();
+  static final instance = _AppState._();
+
+  String userEmail = '';
+  Uint8List? profileBytes;  // raw image bytes for pfp
+  bool darkMode = false;
+
+  void setEmail(String e)       { userEmail = e; notifyListeners(); }
+  void setProfile(Uint8List? b) { profileBytes = b; notifyListeners(); }
+  void toggleDark()             { darkMode = !darkMode; notifyListeners(); }
+  void logout()                 { userEmail = ''; profileBytes = null; notifyListeners(); }
+}
+
+// ─── APP ROOT ────────────────────────────────────────────────────────────────
+
+class CeladonApp extends StatefulWidget {
+  const CeladonApp({super.key});
+  @override
+  State<CeladonApp> createState() => _CeladonAppState();
+}
+
+class _CeladonAppState extends State<CeladonApp> {
+  final _appState = _AppState.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _appState.addListener(_onStateChange);
+  }
+
+  @override
+  void dispose() {
+    _appState.removeListener(_onStateChange);
+    super.dispose();
+  }
+
+  void _onStateChange() => setState(() {});
+
+  ThemeData _buildTheme(bool dark) {
+    return ThemeData(
+      fontFamily: 'Georgia',
+      brightness: dark ? Brightness.dark : Brightness.light,
+      scaffoldBackgroundColor: dark ? const Color(0xFF1E1A14) : CeladonColors.cream,
+      colorScheme: dark
+          ? const ColorScheme.dark(
+              primary: CeladonColors.sage,
+              secondary: CeladonColors.terracotta,
+              surface: Color(0xFF2A2318),
+            )
+          : const ColorScheme.light(
+              primary: CeladonColors.sage,
+              secondary: CeladonColors.terracotta,
+              surface: CeladonColors.pageWhite,
+            ),
+      useMaterial3: true,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = _appState.darkMode;
     return MaterialApp(
       title: 'Celadon',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        fontFamily: 'Georgia',
-        scaffoldBackgroundColor: CeladonColors.cream,
-        colorScheme: const ColorScheme.light(
-          primary: CeladonColors.sage,
-          secondary: CeladonColors.terracotta,
-          surface: CeladonColors.pageWhite,
-        ),
-        useMaterial3: true,
-      ),
-      home: _CalendarStateProvider(child: const MainShell()),
+      theme: _buildTheme(false),
+      darkTheme: _buildTheme(true),
+      themeMode: dark ? ThemeMode.dark : ThemeMode.light,
+      home: const LoginScreen(),
+      onGenerateRoute: (settings) {
+        if (settings.name == '/main') {
+          final email = settings.arguments as String? ?? '';
+          _appState.setEmail(email);
+          return _PageFlipRoute(
+            page: _CalendarStateProvider(child: const MainShell()),
+            userName: email.split('@').first,
+          );
+        }
+        return null;
+      },
     );
   }
 }
@@ -1280,7 +2180,7 @@ class ScreenHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 20, 0),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1319,7 +2219,347 @@ class ScreenHeader extends StatelessWidget {
               ),
             ),
           ),
+          // Profile avatar — top right
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _ProfileAvatar(),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Profile Avatar button
+class _ProfileAvatar extends StatefulWidget {
+  @override
+  State<_ProfileAvatar> createState() => _ProfileAvatarState();
+}
+
+class _ProfileAvatarState extends State<_ProfileAvatar> {
+  final _appState = _AppState.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _appState.addListener(_rebuild);
+  }
+
+  @override
+  void dispose() {
+    _appState.removeListener(_rebuild);
+    super.dispose();
+  }
+
+  void _rebuild() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes   = _appState.profileBytes;
+    final initial = _appState.userEmail.isNotEmpty
+        ? _appState.userEmail[0].toUpperCase()
+        : '?';
+
+    return GestureDetector(
+      onTap: () => _ProfileSheet.show(context),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: CeladonColors.terracottaLight,
+            border: Border.all(color: CeladonColors.terracotta.withAlpha(120), width: 2),
+            image: bytes != null
+                ? DecorationImage(image: MemoryImage(bytes), fit: BoxFit.cover)
+                : null,
+            boxShadow: [BoxShadow(color: CeladonColors.softShadow, blurRadius: 6, offset: const Offset(0, 2))],
+          ),
+          child: bytes == null
+              ? Center(child: Text(initial, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.terracotta)))
+              : null,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Profile / Settings sheet
+class _ProfileSheet {
+  static void show(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => const _ProfileSheetContent(),
+    );
+  }
+}
+
+class _ProfileSheetContent extends StatefulWidget {
+  const _ProfileSheetContent();
+  @override
+  State<_ProfileSheetContent> createState() => _ProfileSheetContentState();
+}
+
+class _ProfileSheetContentState extends State<_ProfileSheetContent> {
+  final _appState = _AppState.instance;
+  bool _resetting = false;
+  final _newPassCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  String? _resetError;
+  String? _resetSuccess;
+
+  @override
+  void dispose() {
+    _newPassCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickProfileImage() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    if (result != null && result.files.first.bytes != null) {
+      _appState.setProfile(result.files.first.bytes);
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _doResetPassword() {
+    final np = _newPassCtrl.text;
+    final cp = _confirmCtrl.text;
+    setState(() { _resetError = null; _resetSuccess = null; });
+    if (np.length <= 5) { setState(() => _resetError = 'Password must be more than 5 characters'); return; }
+    if (np != cp)       { setState(() => _resetError = 'Passwords do not match'); return; }
+    final err = _AuthStore.instance.resetPassword(_appState.userEmail, np);
+    if (err != null) { setState(() => _resetError = err); return; }
+    setState(() { _resetSuccess = 'Password updated ✔'; _resetting = false; });
+    _newPassCtrl.clear(); _confirmCtrl.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark    = _appState.darkMode;
+    final bytes   = _appState.profileBytes;
+    final email   = _appState.userEmail;
+    final initial = email.isNotEmpty ? email[0].toUpperCase() : '?';
+    final name    = email.split('@').first;
+
+    final bg   = dark ? const Color(0xFF2A2318) : CeladonColors.pageWhite;
+    final fg   = dark ? CeladonColors.cream : CeladonColors.inkBrown;
+    final rule = dark ? const Color(0xFF3A3020) : CeladonColors.ruleLine;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 20)],
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(width: 36, height: 4, decoration: BoxDecoration(color: rule, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 20),
+
+          // Avatar + name
+          GestureDetector(
+            onTap: _pickProfileImage,
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                Container(
+                  width: 72, height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: CeladonColors.terracottaLight,
+                    border: Border.all(color: CeladonColors.terracotta.withAlpha(140), width: 2.5),
+                    image: bytes != null
+                        ? DecorationImage(image: MemoryImage(bytes), fit: BoxFit.cover)
+                        : null,
+                  ),
+                  child: bytes == null
+                      ? Center(child: Text(initial, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: CeladonColors.terracotta)))
+                      : null,
+                ),
+                Container(
+                  width: 22, height: 22,
+                  decoration: BoxDecoration(
+                    color: CeladonColors.sage,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: bg, width: 2),
+                  ),
+                  child: const Icon(Icons.camera_alt_rounded, size: 12, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: fg)),
+          Text(email, style: const TextStyle(fontSize: 11, color: CeladonColors.mutedSage)),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: _pickProfileImage,
+            child: Text('Tap avatar to change photo', style: TextStyle(fontSize: 10, color: CeladonColors.sage.withAlpha(180))),
+          ),
+          const SizedBox(height: 20),
+
+          Divider(color: rule, height: 1),
+          const SizedBox(height: 8),
+
+          // ── Reset password (expandable)
+          _SheetTile(
+            icon: Icons.lock_reset_rounded,
+            label: 'Reset Password',
+            color: CeladonColors.terracotta,
+            fg: fg,
+            trailing: Icon(_resetting ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 18, color: CeladonColors.mutedSage),
+            onTap: () => setState(() { _resetting = !_resetting; _resetError = null; _resetSuccess = null; }),
+          ),
+
+          if (_resetting) ...[
+            const SizedBox(height: 10),
+            _MiniField(controller: _newPassCtrl, label: 'New password', obscure: true),
+            const SizedBox(height: 8),
+            _MiniField(controller: _confirmCtrl, label: 'Confirm password', obscure: true),
+            if (_resetError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(_resetError!, style: const TextStyle(fontSize: 10, color: Color(0xFFD96060))),
+              ),
+            if (_resetSuccess != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(_resetSuccess!, style: TextStyle(fontSize: 10, color: CeladonColors.sage)),
+              ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: GestureDetector(
+                onTap: _doResetPassword,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: CeladonColors.inkBrown,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Center(child: Text('Update Password', style: TextStyle(fontSize: 12, color: CeladonColors.cream, fontWeight: FontWeight.w700))),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          Divider(color: rule, height: 1),
+
+          // ── Theme toggle
+          _SheetTile(
+            icon: dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+            label: dark ? 'Switch to Light Theme' : 'Switch to Dark Theme',
+            color: CeladonColors.sage,
+            fg: fg,
+            trailing: Switch(
+              value: dark,
+              activeThumbColor: CeladonColors.sage,
+              onChanged: (_) { _appState.toggleDark(); setState(() {}); },
+            ),
+            onTap: () { _appState.toggleDark(); setState(() {}); },
+          ),
+
+          Divider(color: rule, height: 1),
+
+          // ── Contact support
+          _SheetTile(
+            icon: Icons.support_agent_rounded,
+            label: 'Contact Support',
+            color: const Color(0xFF6A8FA0),
+            fg: fg,
+            onTap: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Support: support@celadon.app'),
+                  backgroundColor: CeladonColors.inkBrown,
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            },
+          ),
+
+          Divider(color: rule, height: 1),
+
+          // ── Logout
+          _SheetTile(
+            icon: Icons.logout_rounded,
+            label: 'Log Out',
+            color: const Color(0xFFD96060),
+            fg: const Color(0xFFD96060),
+            onTap: () {
+              _appState.logout();
+              Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final Color fg;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  const _SheetTile({required this.icon, required this.label, required this.color, required this.fg, this.trailing, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          color: color.withAlpha(20),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, size: 18, color: color),
+      ),
+      title: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg)),
+      trailing: trailing ?? const Icon(Icons.chevron_right_rounded, size: 18, color: CeladonColors.mutedSage),
+      onTap: onTap,
+    );
+  }
+}
+
+class _MiniField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final bool obscure;
+  const _MiniField({required this.controller, required this.label, this.obscure = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      style: const TextStyle(fontSize: 13, color: CeladonColors.inkBrown),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(fontSize: 11, color: CeladonColors.mutedSage),
+        filled: true, fillColor: CeladonColors.cream,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
       ),
     );
   }
