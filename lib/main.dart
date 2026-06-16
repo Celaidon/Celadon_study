@@ -256,7 +256,7 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final screens = [
       const TodayScreen(),
-      const WeekScreen(),
+      const StudyScreen(),
       const AllTasksScreen(),
     ];
 
@@ -280,7 +280,7 @@ class _NotebookNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     const items = [
       (Icons.today_rounded, 'Today'),
-      (Icons.date_range_rounded, 'Week'),
+      (Icons.menu_book_rounded, 'Study'),
       (Icons.list_alt_rounded, 'All Tasks'),
     ];
 
@@ -2359,19 +2359,125 @@ class _WaterReminderCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── SCREEN 2: WEEK ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── SCREEN 2: STUDY HOURS ───────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class WeekScreen extends StatelessWidget {
-  const WeekScreen({super.key});
+/// A single subject entry with goal hours and actual studied hours.
+class _SubjectStudy {
+  final String name;
+  final Color color;
+  double goalHours;
+  double actualHours;
+
+  _SubjectStudy({
+    required this.name,
+    required this.color,
+    this.goalHours = 1.0,
+    this.actualHours = 0.0,
+  });
+}
+
+class StudyScreen extends StatefulWidget {
+  const StudyScreen({super.key});
+
+  @override
+  State<StudyScreen> createState() => _StudyScreenState();
+}
+
+class _StudyScreenState extends State<StudyScreen> {
+  double _totalGoal = 6.0;
+  double _totalActual = 0.0;
+
+  final List<_SubjectStudy> _subjects = [
+    _SubjectStudy(name: 'Mathematics', color: const Color(0xFF7C9A7E), goalHours: 1.5, actualHours: 1.0),
+    _SubjectStudy(name: 'Chemistry', color: const Color(0xFFD4956A), goalHours: 1.0, actualHours: 0.5),
+    _SubjectStudy(name: 'Physics', color: const Color(0xFF6A8FA0), goalHours: 1.0, actualHours: 1.2),
+    _SubjectStudy(name: 'English Lit', color: const Color(0xFF9B8EA0), goalHours: 1.0, actualHours: 0.0),
+    _SubjectStudy(name: 'History', color: const Color(0xFFA09B6A), goalHours: 1.0, actualHours: 0.0),
+  ];
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  double get _subjectGoalSum => _subjects.fold(0.0, (s, e) => s + e.goalHours);
+  double get _subjectActualSum => _subjects.fold(0.0, (s, e) => s + e.actualHours);
+  double get _effectiveGoal => _totalGoal > 0 ? _totalGoal : 1;
+  double get _progress => (_totalActual / _effectiveGoal).clamp(0.0, 2.0);
+
+  // ── Motivational message based on progress ────────────────────────────────
+  String get _motivationalMessage {
+    final pct = _progress;
+    if (pct >= 1.0) return '🌟 Amazing! You crushed your goal!';
+    if (pct >= 0.75) return '💪 Almost there — keep pushing!';
+    if (pct >= 0.50) return '📖 Halfway done — great progress!';
+    if (pct >= 0.25) return '🌱 Good start — stay focused!';
+    if (_totalActual > 0) return '☕ Every minute counts. Keep going!';
+    return '✏️ Time to start studying!';
+  }
+
+  Color get _motivationalColor {
+    final pct = _progress;
+    if (pct >= 1.0) return const Color(0xFF4CAF50);
+    if (pct >= 0.75) return CeladonColors.sage;
+    if (pct >= 0.50) return const Color(0xFF6A8FA0);
+    if (pct >= 0.25) return CeladonColors.terracotta;
+    return CeladonColors.mutedSage;
+  }
+
+  String get _motivationalEmoji {
+    final pct = _progress;
+    if (pct >= 1.0) return '🎉';
+    if (pct >= 0.75) return '🔥';
+    if (pct >= 0.50) return '📚';
+    if (pct >= 0.25) return '💡';
+    return '⏰';
+  }
+
+  // ── Sync total from subjects ──────────────────────────────────────────────
+  void _syncTotalFromSubjects() {
+    setState(() {
+      _totalActual = _subjectActualSum;
+    });
+  }
+
+  // ── Editable number dialog ────────────────────────────────────────────────
+  Future<double?> _editNumber(String label, double current) async {
+    final ctrl = TextEditingController(text: current.toStringAsFixed(1));
+    return showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: CeladonColors.pageWhite,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown)),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+          style: const TextStyle(fontSize: 18, color: CeladonColors.inkBrown),
+          decoration: InputDecoration(
+            suffix: const Text('hrs', style: TextStyle(fontSize: 13, color: CeladonColors.mutedSage)),
+            filled: true, fillColor: CeladonColors.cream,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: CeladonColors.mutedSage))),
+          TextButton(
+            onPressed: () {
+              final val = double.tryParse(ctrl.text) ?? current;
+              Navigator.pop(ctx, val.clamp(0.0, 24.0));
+            },
+            child: const Text('Save', style: TextStyle(color: CeladonColors.sage, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final weekStart = now.subtract(Duration(days: now.weekday - 1));
-    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    final taskCounts = [5, 3, 7, 2, 4, 1, 0];
-    final doneCounts = [4, 1, 3, 2, 2, 0, 0];
+    _totalActual = _subjectActualSum; // keep in sync
+    final pctDisplay = (_progress * 100).round().clamp(0, 200);
 
     return Scaffold(
       backgroundColor: CeladonColors.cream,
@@ -2379,85 +2485,159 @@ class WeekScreen extends StatelessWidget {
         child: SafeArea(
           child: CustomScrollView(
             slivers: [
+              // ── Header ──────────────────────────────────────────────────
               SliverToBoxAdapter(
                 child: ScreenHeader(
-                  eyebrow: 'THIS WEEK',
-                  title: _weekRange(weekStart),
+                  eyebrow: 'STUDY TRACKER',
+                  title: 'Today\'s Hours',
                 ),
               ),
 
+              // ── Circular progress + total goal/actual ──────────────────
               SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 140,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                    itemCount: 7,
-                    itemBuilder: (_, i) {
-                      final day = weekStart.add(Duration(days: i));
-                      final isToday = day.day == now.day && day.month == now.month;
-                      final total = taskCounts[i];
-                      final done = doneCounts[i];
-                      final pct = total == 0 ? 0.0 : done / total;
-
-                      return Container(
-                        width: 80, margin: const EdgeInsets.only(right: 10),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isToday ? CeladonColors.sage : CeladonColors.pageWhite,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: isToday ? CeladonColors.sage : CeladonColors.ruleLine),
-                          boxShadow: [BoxShadow(
-                            color: isToday ? CeladonColors.sage.withAlpha(60) : CeladonColors.softShadow,
-                            blurRadius: 8, offset: const Offset(0, 3),
-                          )],
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: CeladonColors.pageWhite,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: CeladonColors.calBrown.withAlpha(120)),
+                      boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 10, offset: Offset(0, 4))],
+                    ),
+                    child: Row(
+                      children: [
+                        // Ring
+                        SizedBox(
+                          width: 100, height: 100,
+                          child: CustomPaint(
+                            painter: _ProgressRingPainter(
+                              progress: _progress.clamp(0.0, 1.0),
+                              trackColor: CeladonColors.ruleLine,
+                              fillColor: _motivationalColor,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '$pctDisplay%',
+                                style: TextStyle(
+                                  fontSize: 20, fontWeight: FontWeight.w800,
+                                  color: _motivationalColor,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(dayLabels[i], style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                                color: isToday ? Colors.white70 : CeladonColors.mutedSage, letterSpacing: 0.5)),
-                            const SizedBox(height: 2),
-                            Text('${day.day}', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700,
-                                color: isToday ? Colors.white : CeladonColors.inkBrown)),
-                            const Spacer(),
-                            if (total > 0) ...[
-                              ClipRRect(borderRadius: BorderRadius.circular(4),
-                                child: LinearProgressIndicator(value: pct, minHeight: 4,
-                                  backgroundColor: isToday ? Colors.white30 : CeladonColors.ruleLine,
-                                  valueColor: AlwaysStoppedAnimation(isToday ? Colors.white : CeladonColors.terracotta))),
-                              const SizedBox(height: 4),
-                              Text('$done/$total', style: TextStyle(fontSize: 10,
-                                  color: isToday ? Colors.white70 : CeladonColors.mutedSage)),
-                            ] else
-                              Text('Free', style: TextStyle(fontSize: 11,
-                                  color: isToday ? Colors.white60 : CeladonColors.mutedSage,
-                                  fontStyle: FontStyle.italic)),
-                          ],
+                        const SizedBox(width: 20),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Goal
+                              GestureDetector(
+                                onTap: () async {
+                                  final v = await _editNumber('Daily Study Goal', _totalGoal);
+                                  if (v != null) setState(() => _totalGoal = v);
+                                },
+                                child: _HourRow(
+                                  label: 'Goal',
+                                  hours: _totalGoal,
+                                  color: CeladonColors.inkBrown,
+                                  icon: Icons.flag_rounded,
+                                  editable: true,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              // Actual
+                              _HourRow(
+                                label: 'Studied',
+                                hours: _totalActual,
+                                color: _motivationalColor,
+                                icon: Icons.timer_rounded,
+                                editable: false,
+                              ),
+                              const SizedBox(height: 14),
+                              // Motivational message
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: _motivationalColor.withAlpha(20),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: _motivationalColor.withAlpha(60)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(_motivationalEmoji, style: const TextStyle(fontSize: 14)),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        _motivationalMessage,
+                                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _motivationalColor),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      );
-                    },
+                      ],
+                    ),
                   ),
                 ),
               ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 24)),
-
+              // ── Subject-wise header ─────────────────────────────────────
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(64, 0, 20, 12),
-                  child: const Text('BY SUBJECT', style: TextStyle(fontSize: 11, letterSpacing: 1.5,
-                      color: CeladonColors.mutedSage, fontWeight: FontWeight.w600)),
+                  padding: const EdgeInsets.fromLTRB(28, 24, 20, 8),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'BY SUBJECT',
+                        style: TextStyle(fontSize: 10, letterSpacing: 1.5, color: CeladonColors.mutedSage, fontWeight: FontWeight.w700),
+                      ),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: _addSubject,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: CeladonColors.sageLight,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.add_rounded, size: 12, color: CeladonColors.sage),
+                              SizedBox(width: 2),
+                              Text('Add Subject', style: TextStyle(fontSize: 10, color: CeladonColors.sage, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 
-              SliverList(delegate: SliverChildListDelegate([
-                _SubjectRow(subject: 'Mathematics', tasks: 5, color: const Color(0xFF7C9A7E)),
-                _SubjectRow(subject: 'Chemistry', tasks: 4, color: const Color(0xFFD4956A)),
-                _SubjectRow(subject: 'English Lit', tasks: 3, color: const Color(0xFF9B8EA0)),
-                _SubjectRow(subject: 'Physics', tasks: 2, color: const Color(0xFF6A8FA0)),
-                _SubjectRow(subject: 'History', tasks: 2, color: const Color(0xFFA09B6A)),
-              ])),
+              // ── Subject rows ────────────────────────────────────────────
+              SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) => _StudySubjectRow(
+                    study: _subjects[i],
+                    onGoalTap: () async {
+                      final v = await _editNumber('${_subjects[i].name} — Goal', _subjects[i].goalHours);
+                      if (v != null) setState(() { _subjects[i].goalHours = v; _syncTotalFromSubjects(); });
+                    },
+                    onActualTap: () async {
+                      final v = await _editNumber('${_subjects[i].name} — Studied', _subjects[i].actualHours);
+                      if (v != null) setState(() { _subjects[i].actualHours = v; _syncTotalFromSubjects(); });
+                    },
+                    onDelete: () => setState(() { _subjects.removeAt(i); _syncTotalFromSubjects(); }),
+                  ),
+                  childCount: _subjects.length,
+                ),
+              ),
 
               const SliverToBoxAdapter(child: SizedBox(height: 80)),
             ],
@@ -2467,45 +2647,241 @@ class WeekScreen extends StatelessWidget {
     );
   }
 
-  String _weekRange(DateTime start) {
-    final end = start.add(const Duration(days: 6));
-    const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    if (start.month == end.month) return '${start.day}–${end.day} ${months[start.month]}';
-    return '${start.day} ${months[start.month]} – ${end.day} ${months[end.month]}';
+  void _addSubject() async {
+    final nameCtrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: CeladonColors.pageWhite,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Add Subject', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown)),
+        content: TextField(
+          controller: nameCtrl,
+          autofocus: true,
+          style: const TextStyle(fontSize: 15, color: CeladonColors.inkBrown),
+          decoration: InputDecoration(
+            hintText: 'Subject name',
+            hintStyle: const TextStyle(color: CeladonColors.mutedSage),
+            filled: true, fillColor: CeladonColors.cream,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: CeladonColors.mutedSage))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, nameCtrl.text.trim()),
+            child: const Text('Add', style: TextStyle(color: CeladonColors.sage, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (name != null && name.isNotEmpty) {
+      // Cycle through a palette for new subjects
+      const palette = [
+        Color(0xFF7C9A7E), Color(0xFFD4956A), Color(0xFF6A8FA0),
+        Color(0xFF9B8EA0), Color(0xFFA09B6A), Color(0xFFB07878),
+      ];
+      setState(() {
+        _subjects.add(_SubjectStudy(
+          name: name,
+          color: palette[_subjects.length % palette.length],
+        ));
+      });
+    }
   }
 }
 
-class _SubjectRow extends StatelessWidget {
-  final String subject;
-  final int tasks;
+// ─── HOUR ROW (total card) ───────────────────────────────────────────────────
+
+class _HourRow extends StatelessWidget {
+  final String label;
+  final double hours;
   final Color color;
-  const _SubjectRow({required this.subject, required this.tasks, required this.color});
+  final IconData icon;
+  final bool editable;
+  const _HourRow({required this.label, required this.hours, required this.color, required this.icon, this.editable = false});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Row(
-        children: [
-          const SizedBox(width: 36),
-          const SizedBox(width: 12),
-          Container(width: 4, height: 40, margin: const EdgeInsets.only(right: 12),
-              decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(color: CeladonColors.pageWhite,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: CeladonColors.ruleLine)),
-              child: Row(
-                children: [
-                  Text(subject, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: CeladonColors.inkBrown)),
-                  const Spacer(),
-                  Text('$tasks tasks', style: const TextStyle(fontSize: 12, color: CeladonColors.mutedSage)),
-                ],
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 6),
+        Text(label, style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+        const Spacer(),
+        Text(
+          '${hours.toStringAsFixed(1)} hrs',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: color),
+        ),
+        if (editable) ...[
+          const SizedBox(width: 4),
+          Icon(Icons.edit_rounded, size: 11, color: color.withAlpha(140)),
+        ],
+      ],
+    );
+  }
+}
+
+// ─── PROGRESS RING PAINTER ───────────────────────────────────────────────────
+
+class _ProgressRingPainter extends CustomPainter {
+  final double progress;
+  final Color trackColor;
+  final Color fillColor;
+  _ProgressRingPainter({required this.progress, required this.trackColor, required this.fillColor});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - 6;
+    const strokeWidth = 8.0;
+
+    // Track
+    canvas.drawCircle(
+      center, radius,
+      Paint()..color = trackColor..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.round,
+    );
+
+    // Fill arc
+    final sweepAngle = 2 * math.pi * progress;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2, sweepAngle,
+      false,
+      Paint()..color = fillColor..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ProgressRingPainter old) => old.progress != progress || old.fillColor != fillColor;
+}
+
+// ─── STUDY SUBJECT ROW ───────────────────────────────────────────────────────
+
+class _StudySubjectRow extends StatelessWidget {
+  final _SubjectStudy study;
+  final VoidCallback onGoalTap;
+  final VoidCallback onActualTap;
+  final VoidCallback onDelete;
+  const _StudySubjectRow({required this.study, required this.onGoalTap, required this.onActualTap, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = study.goalHours > 0 ? (study.actualHours / study.goalHours).clamp(0.0, 1.0) : 0.0;
+    final metGoal = study.actualHours >= study.goalHours && study.goalHours > 0;
+
+    return Dismissible(
+      key: Key('study-${study.name}'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => onDelete(),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        margin: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFD96060),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 18),
+      ),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: CeladonColors.pageWhite,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: metGoal ? study.color.withAlpha(120) : CeladonColors.ruleLine),
+          boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 4, offset: Offset(0, 2))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Name + badge
+            Row(
+              children: [
+                Container(
+                  width: 4, height: 18,
+                  decoration: BoxDecoration(color: study.color, borderRadius: BorderRadius.circular(2)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    study.name,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown),
+                  ),
+                ),
+                if (metGoal)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4CAF50).withAlpha(25),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text('✓ Done', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Color(0xFF4CAF50))),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // Progress bar
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: pct,
+                minHeight: 5,
+                backgroundColor: CeladonColors.ruleLine,
+                valueColor: AlwaysStoppedAnimation(study.color),
               ),
             ),
-          ),
+            const SizedBox(height: 10),
+            // Goal / Actual tappable row
+            Row(
+              children: [
+                GestureDetector(
+                  onTap: onGoalTap,
+                  child: _SubjectHourChip(label: 'Goal', hours: study.goalHours, color: CeladonColors.mutedSage),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: onActualTap,
+                  child: _SubjectHourChip(label: 'Studied', hours: study.actualHours, color: study.color),
+                ),
+                const Spacer(),
+                Text(
+                  '${(pct * 100).round()}%',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: study.color),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SubjectHourChip extends StatelessWidget {
+  final String label;
+  final double hours;
+  final Color color;
+  const _SubjectHourChip({required this.label, required this.hours, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withAlpha(50)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$label: ', style: TextStyle(fontSize: 10, color: color)),
+          Text('${hours.toStringAsFixed(1)}h', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+          const SizedBox(width: 2),
+          Icon(Icons.edit_rounded, size: 9, color: color.withAlpha(120)),
         ],
       ),
     );
