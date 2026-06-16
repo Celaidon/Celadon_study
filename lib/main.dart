@@ -522,53 +522,24 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   bool _obscure       = true;
   String? _error;
 
-  // ── Cover open animation
-  late final AnimationController _coverCtrl;
-  late final Animation<double>    _coverAngle;   // 0 → -π/2 (cover swings open)
-  late final Animation<double>    _formFade;
-
-  // ── Floating dust-motes
-  late final AnimationController _dustCtrl;
-  final List<_DustMote> _motes = List.generate(18, (i) => _DustMote(i));
-
-  // ── Clasp pulse
-  late final AnimationController _claspCtrl;
-  late final Animation<double>   _claspPulse;
-
-  bool _coverOpen = false;
+  // ── Subtle fade-in animation for the form
+  late final AnimationController _fadeCtrl;
+  late final Animation<double> _fade;
 
   @override
   void initState() {
     super.initState();
-
-    _coverCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
-    _coverAngle = Tween<double>(begin: 0, end: -math.pi / 2)
-        .animate(CurvedAnimation(parent: _coverCtrl, curve: Curves.easeInOut));
-    _formFade = Tween<double>(begin: 0, end: 1)
-        .animate(CurvedAnimation(parent: _coverCtrl, curve: const Interval(0.5, 1.0, curve: Curves.easeOut)));
-
-    _dustCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 8))
-      ..repeat();
-
-    _claspCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat(reverse: true);
-    _claspPulse = Tween<double>(begin: 0.85, end: 1.0)
-        .animate(CurvedAnimation(parent: _claspCtrl, curve: Curves.easeInOut));
+    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _fade = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _fadeCtrl.forward();
   }
 
   @override
   void dispose() {
     _emailCtrl.dispose();
     _passCtrl.dispose();
-    _coverCtrl.dispose();
-    _dustCtrl.dispose();
-    _claspCtrl.dispose();
+    _fadeCtrl.dispose();
     super.dispose();
-  }
-
-  void _openCover() {
-    setState(() => _coverOpen = true);
-    _coverCtrl.forward();
   }
 
   void _submit() async {
@@ -589,118 +560,57 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isWide = size.width > 600;
+
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF2A1505), Color(0xFF3E1F08), Color(0xFF5C2E0A), Color(0xFF3A1A04)],
-            stops: [0.0, 0.35, 0.7, 1.0],
+      backgroundColor: const Color(0xFF2C1206),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ── Full-screen background image
+          Image.asset(
+            'assets/main_screen.png',
+            fit: isWide ? BoxFit.cover : BoxFit.contain,
+            alignment: Alignment.center,
           ),
-        ),
-        child: Stack(
-          children: [
-            // ── Leather texture overlay
-            CustomPaint(painter: _LeatherTexturePainter(), child: const SizedBox.expand()),
 
-            // ── Floating dust motes
-            AnimatedBuilder(
-              animation: _dustCtrl,
-              builder: (_, __) => CustomPaint(
-                painter: _DustPainter(_motes, _dustCtrl.value),
-                child: const SizedBox.expand(),
-              ),
-            ),
-
-            // ── Decorative ruled lines on outside (faint)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(painter: _FaintLinesPainter()),
-              ),
-            ),
-
-            // ── Corner embossing (golden)
-            const Positioned(top: 20, left: 20,  child: _CornerEmboss()),
-            const Positioned(top: 20, right: 20, child: _CornerEmboss(flip: true)),
-            const Positioned(bottom: 20, left: 20,  child: _CornerEmboss(bottom: true)),
-            const Positioned(bottom: 20, right: 20, child: _CornerEmboss(flip: true, bottom: true)),
-
-            // ── Book spine (left edge)
-            Positioned(
-              left: 0, top: 0, bottom: 0,
-              child: Container(
-                width: 28,
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft, end: Alignment.centerRight,
-                    colors: [Color(0xFF1A0C02), Color(0xFF4A2208)],
+          // ── Login form in the empty center/bottom area of the illustration
+          FadeTransition(
+            opacity: _fade,
+            child: Center(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    top: size.height * 0.38,
+                    left: isWide ? size.width * 0.10 : size.width * 0.08,
+                    right: isWide ? size.width * 0.10 : size.width * 0.08,
+                    bottom: size.height * 0.16,
                   ),
-                ),
-                child: RotatedBox(
-                  quarterTurns: 3,
-                  child: Center(
-                    child: Text(
-                      'C E L A D O N',
-                      style: TextStyle(
-                        fontSize: 9, letterSpacing: 4,
-                        color: const Color(0xFFD4A84B).withAlpha(160),
-                        fontWeight: FontWeight.w600,
-                      ),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 380),
+                    child: _LoginForm(
+                      formKey: _formKey,
+                      emailCtrl: _emailCtrl,
+                      passCtrl: _passCtrl,
+                      isSignUp: _isSignUp,
+                      obscure: _obscure,
+                      error: _error,
+                      onToggleMode: () => setState(() => _isSignUp = !_isSignUp),
+                      onToggleObscure: () => setState(() => _obscure = !_obscure),
+                      onSubmit: _submit,
                     ),
                   ),
                 ),
               ),
             ),
-
-            // ── Main content area (cover → form) — fills entire screen
-            Positioned.fill(
-              child: AnimatedBuilder(
-                animation: _coverCtrl,
-                builder: (_, __) {
-                  return Stack(
-                    children: [
-                      // Form (behind cover, revealed as cover swings)
-                      if (_coverOpen)
-                        FadeTransition(
-                          opacity: _formFade,
-                          child: _LoginForm(
-                            formKey: _formKey,
-                            emailCtrl: _emailCtrl,
-                            passCtrl: _passCtrl,
-                            isSignUp: _isSignUp,
-                            obscure: _obscure,
-                            error: _error,
-                            onToggleMode: () => setState(() => _isSignUp = !_isSignUp),
-                            onToggleObscure: () => setState(() => _obscure = !_obscure),
-                            onSubmit: _submit,
-                          ),
-                        ),
-
-                      // Notebook cover (swings open like a book page)
-                      if (!_coverOpen || _coverAngle.value > -math.pi / 2 + 0.05)
-                        Transform(
-                          alignment: Alignment.centerLeft,
-                          transform: Matrix4.identity()
-                            ..setEntry(3, 2, 0.0005)
-                            ..rotateY(_coverAngle.value),
-                          child: _NotebookCoverPanel(
-                            claspPulse: _claspPulse,
-                            coverOpen: _coverOpen,
-                            onTap: _coverOpen ? null : _openCover,
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
+
 
 // ── Notebook cover panel
 class _NotebookCoverPanel extends StatelessWidget {
@@ -860,34 +770,17 @@ class _LoginForm extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox.expand(
-      child: Stack(
-        children: [
-          // Ruled lines background
-          CustomPaint(painter: _RuledPagePainter(), child: const SizedBox.expand()),
-
-          // Red margin line
-          const Positioned(
-            left: 48, top: 0, bottom: 0,
-            child: VerticalDivider(width: 1, color: Color(0x50E8A0A0)),
-          ),
-
-          // Spiral holes
-          const Positioned(
-            left: 0, top: 0, bottom: 0,
-            child: SizedBox(
-              width: 24,
-              child: _SpiralHolesWidget(),
-            ),
-          ),
-
-          // Centered form content
-          Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(60, 40, 32, 32),
-                child: Form(
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F3E9).withAlpha(230),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withAlpha(60), blurRadius: 24, offset: const Offset(0, 8)),
+        ],
+        border: Border.all(color: const Color(0xFFD4A84B).withAlpha(80), width: 1.5),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+      child: Form(
                   key: formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1001,11 +894,6 @@ class _LoginForm extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1857,46 +1745,10 @@ class _MiniMonthGrid extends StatelessWidget {
                 final d = DateTime(now.year, now.month, dayNum);
                 final event = calState.eventFor(d);
 
-                return SizedBox(
-                  width: 13,
-                  height: 13,
-                  child: Center(
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        if (isToday)
-                          Container(
-                            width: 12,
-                            height: 12,
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                            ),
-                          )
-                        else if (event != null)
-                          Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              color: event.color.withAlpha(180),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        Text(
-                          '$dayNum',
-                          style: TextStyle(
-                            fontSize: 6.5,
-                            fontWeight: isToday ? FontWeight.w800 : FontWeight.w400,
-                            color: isToday
-                                ? const Color(0xFF4A2E14)
-                                : event != null
-                                    ? Colors.white
-                                    : CeladonColors.calCream,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                return _MiniDayCell(
+                  dayNum: dayNum,
+                  isToday: isToday,
+                  event: event,
                 );
               }),
             );
@@ -1906,6 +1758,104 @@ class _MiniMonthGrid extends StatelessWidget {
     );
   }
 }
+
+// ── Mini calendar day cell with hover glow
+class _MiniDayCell extends StatefulWidget {
+  final int dayNum;
+  final bool isToday;
+  final DayEvent? event;
+  const _MiniDayCell({required this.dayNum, required this.isToday, required this.event});
+
+  @override
+  State<_MiniDayCell> createState() => _MiniDayCellState();
+}
+
+class _MiniDayCellState extends State<_MiniDayCell> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+  bool _hovered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 150));
+    _scale = Tween<double>(begin: 1.0, end: 1.45)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) { setState(() => _hovered = true); _ctrl.forward(); },
+      onExit:  (_) { setState(() => _hovered = false); _ctrl.reverse(); },
+      child: AnimatedBuilder(
+        animation: _scale,
+        builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
+        child: SizedBox(
+          width: 13,
+          height: 13,
+          child: Center(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (widget.isToday)
+                  Container(
+                    width: 12, height: 12,
+                    decoration: BoxDecoration(
+                      color: _hovered ? Colors.white : Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: _hovered
+                          ? [BoxShadow(color: Colors.white.withAlpha(160), blurRadius: 6)]
+                          : null,
+                    ),
+                  )
+                else if (widget.event != null)
+                  Container(
+                    width: 10, height: 10,
+                    decoration: BoxDecoration(
+                      color: widget.event!.color.withAlpha(_hovered ? 230 : 180),
+                      shape: BoxShape.circle,
+                      boxShadow: _hovered
+                          ? [BoxShadow(color: widget.event!.color.withAlpha(140), blurRadius: 5)]
+                          : null,
+                    ),
+                  )
+                else if (_hovered)
+                  Container(
+                    width: 12, height: 12,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(40),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                Text(
+                  '${widget.dayNum}',
+                  style: TextStyle(
+                    fontSize: 6.5,
+                    fontWeight: widget.isToday ? FontWeight.w800 : FontWeight.w400,
+                    color: widget.isToday
+                        ? const Color(0xFF4A2E14)
+                        : widget.event != null
+                            ? Colors.white
+                            : CeladonColors.calCream,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── FULL CALENDAR MODAL ─────────────────────────────────────────────────────
@@ -3793,15 +3743,7 @@ class _BearWidgetState extends State<_BearWidget> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Bear drawing fills whatever height is available
-        Expanded(
-          child: CustomPaint(
-            painter: _BearPainter(),
-            child: const SizedBox.expand(),
-          ),
-        ),
-        const SizedBox(height: 6),
-        // Rotating motivational quote
+        // Rotating motivational quote — sits above the bear
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 500),
           transitionBuilder: (child, anim) =>
@@ -3826,127 +3768,28 @@ class _BearWidgetState extends State<_BearWidget> {
             ),
           ),
         ),
+        const SizedBox(height: 6),
+        // Bear image — white background removed via ColorFilter multiply
+        Expanded(
+          child: ColorFiltered(
+            colorFilter: const ColorFilter.matrix(<double>[
+              // R  G  B  A  offset
+               1, 0, 0, 0, 0,
+               0, 1, 0, 0, 0,
+               0, 0, 1, 0, 0,
+              -1,-1,-1, 1, 3, // alpha = 1 - average(rgb)  → white→transparent
+            ]),
+            child: Image.asset(
+              'assets/bear.png',
+              fit: BoxFit.contain,
+            ),
+          ),
+        ),
       ],
     );
   }
 }
 
-// ─── BEAR CUSTOM PAINTER ──────────────────────────────────────────────────────
-
-class _BearPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height * 0.50;
-    final r = math.min(size.width, size.height) * 0.26;
-
-    const furBrown    = Color(0xFFBE7B4A);
-    const furLighter  = Color(0xFFD49A60);
-    const bodyGreen   = CeladonColors.sage;
-    const muzzleCream = Color(0xFFEDD9B5);
-    const darkBrown   = Color(0xFF2C2416);
-    const innerEar    = Color(0xFFE8A070);
-    final cheekPink   = const Color(0xFFE8806A).withAlpha(75);
-
-    // Body / sweater ────────────────────────────────────────────────────────
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: Offset(cx, cy + r + r * 0.50),
-          width: r * 1.9,
-          height: r * 1.15,
-        ),
-        Radius.circular(r * 0.55),
-      ),
-      Paint()..color = bodyGreen,
-    );
-
-    // Arms + paws ────────────────────────────────────────────────────────────
-    for (final s in [-1.0, 1.0]) {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(
-            center: Offset(cx + s * r * 1.02, cy + r * 0.40),
-            width: r * 0.46,
-            height: r * 0.86,
-          ),
-          Radius.circular(r * 0.23),
-        ),
-        Paint()..color = furBrown,
-      );
-      canvas.drawCircle(
-        Offset(cx + s * r * 1.02, cy + r * 0.88),
-        r * 0.21,
-        Paint()..color = furLighter,
-      );
-    }
-
-    // Ears (behind head) ─────────────────────────────────────────────────────
-    for (final s in [-1.0, 1.0]) {
-      canvas.drawCircle(
-        Offset(cx + s * r * 0.65, cy - r * 0.75),
-        r * 0.32,
-        Paint()..color = furBrown,
-      );
-      canvas.drawCircle(
-        Offset(cx + s * r * 0.65, cy - r * 0.75),
-        r * 0.17,
-        Paint()..color = innerEar,
-      );
-    }
-
-    // Head ────────────────────────────────────────────────────────────────────
-    canvas.drawCircle(Offset(cx, cy), r, Paint()..color = furBrown);
-
-    // Muzzle ──────────────────────────────────────────────────────────────────
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(cx, cy + r * 0.25),
-        width: r * 0.84,
-        height: r * 0.58,
-      ),
-      Paint()..color = muzzleCream,
-    );
-
-    // Rosy cheeks ─────────────────────────────────────────────────────────────
-    canvas.drawCircle(Offset(cx - r * 0.42, cy + r * 0.15), r * 0.17, Paint()..color = cheekPink);
-    canvas.drawCircle(Offset(cx + r * 0.42, cy + r * 0.15), r * 0.17, Paint()..color = cheekPink);
-
-    // Eyes (white sclera + dark pupil + sparkle) ──────────────────────────────
-    for (final s in [-1.0, 1.0]) {
-      final ex = cx + s * r * 0.27;
-      final ey = cy - r * 0.08;
-      canvas.drawCircle(Offset(ex, ey), r * 0.13, Paint()..color = Colors.white);
-      canvas.drawCircle(Offset(ex + r * 0.04, ey), r * 0.085, Paint()..color = darkBrown);
-      canvas.drawCircle(Offset(ex + r * 0.07, ey - r * 0.05), r * 0.028, Paint()..color = Colors.white);
-    }
-
-    // Nose ────────────────────────────────────────────────────────────────────
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(cx, cy + r * 0.06),
-        width: r * 0.21,
-        height: r * 0.13,
-      ),
-      Paint()..color = darkBrown,
-    );
-
-    // Smile ───────────────────────────────────────────────────────────────────
-    canvas.drawPath(
-      Path()
-        ..moveTo(cx - r * 0.15, cy + r * 0.23)
-        ..quadraticBezierTo(cx, cy + r * 0.37, cx + r * 0.15, cy + r * 0.23),
-      Paint()
-        ..color = darkBrown
-        ..strokeWidth = r * 0.055
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter old) => false;
-}
 
 // ─── WATER REMINDER CARD ──────────────────────────────────────────────────────
 
