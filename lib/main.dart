@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
@@ -51,23 +52,46 @@ class Task {
   final String subject;
   final bool isDone;
   final Priority priority;
+  /// null means today
+  final DateTime? dueDate;
+  /// set when task is marked done
+  final DateTime? completedAt;
 
-  const Task({
+  Task({
     required this.id,
     required this.title,
     required this.subject,
     this.isDone = false,
     this.priority = Priority.medium,
+    this.dueDate,
+    this.completedAt,
   });
 
-  Task copyWith({String? id, String? title, String? subject, bool? isDone, Priority? priority}) {
+  Task copyWith({
+    String? id,
+    String? title,
+    String? subject,
+    bool? isDone,
+    Priority? priority,
+    DateTime? dueDate,
+    DateTime? completedAt,
+    bool clearCompletedAt = false,
+  }) {
     return Task(
       id: id ?? this.id,
       title: title ?? this.title,
       subject: subject ?? this.subject,
       isDone: isDone ?? this.isDone,
       priority: priority ?? this.priority,
+      dueDate: dueDate ?? this.dueDate,
+      completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
     );
+  }
+
+  /// True when done AND completed more than 24 h ago.
+  bool get isExpiredCompleted {
+    if (!isDone || completedAt == null) return false;
+    return DateTime.now().difference(completedAt!).inHours >= 24;
   }
 }
 
@@ -131,6 +155,32 @@ class CalendarState extends ChangeNotifier {
     _focusedMonth = m;
     notifyListeners();
   }
+}
+
+// ─── DATE HELPERS ────────────────────────────────────────────────────────────
+
+/// Returns true when [date] falls on today (or is null, meaning "today").
+bool _isToday(DateTime? date) {
+  if (date == null) return true;
+  final now = DateTime.now();
+  return date.year == now.year && date.month == now.month && date.day == now.day;
+}
+
+/// Returns true when [date] falls within the current Mon–Sun week.
+bool _isThisWeek(DateTime? date) {
+  if (date == null) return false;
+  final now = DateTime.now();
+  final startOfToday = DateTime(now.year, now.month, now.day);
+  final weekStart = startOfToday.subtract(Duration(days: now.weekday - 1));
+  final weekEnd = weekStart.add(const Duration(days: 7));
+  return !date.isBefore(weekStart) && date.isBefore(weekEnd);
+}
+
+/// Returns true when [date] falls within the current calendar month.
+bool _isThisMonth(DateTime? date) {
+  if (date == null) return false;
+  final now = DateTime.now();
+  return date.year == now.year && date.month == now.month;
 }
 
 // ─── APP ROOT ────────────────────────────────────────────────────────────────
@@ -450,13 +500,17 @@ class MiniCalendarWidget extends StatelessWidget {
   }
 
   void _openFullCalendar(BuildContext context) {
+    // Capture calState BEFORE the dialog opens — the dialog is pushed onto a
+    // new Navigator route above CalendarStateInherited, so InheritedWidget
+    // lookup would fail inside the modal.
+    final calState = CalendarStateInherited.of(context);
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Calendar',
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 350),
-      pageBuilder: (ctx, anim, __) => const FullCalendarModal(),
+      pageBuilder: (ctx, anim, __) => FullCalendarModal(calState: calState),
       transitionBuilder: (ctx, anim, _, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutBack);
         return ScaleTransition(scale: curved, child: child);
@@ -569,7 +623,8 @@ class _MiniMonthGrid extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class FullCalendarModal extends StatefulWidget {
-  const FullCalendarModal({super.key});
+  final CalendarState calState;
+  const FullCalendarModal({super.key, required this.calState});
 
   @override
   State<FullCalendarModal> createState() => _FullCalendarModalState();
@@ -583,11 +638,25 @@ class _FullCalendarModalState extends State<FullCalendarModal> {
   void initState() {
     super.initState();
     _month = DateTime(DateTime.now().year, DateTime.now().month);
+    // Listen for changes from _DayDetailPanel so the grid re-renders
+    widget.calState.addListener(_onCalStateChanged);
+  }
+
+  void _onCalStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.calState.removeListener(_onCalStateChanged);
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final calState = CalendarStateInherited.of(context);
+    // Use the CalendarState passed in from the parent context (captured before
+    // the dialog was pushed, so it's always valid).
+    final calState = widget.calState;
     final now = DateTime.now();
 
     return Dialog(
@@ -1085,38 +1154,87 @@ class TodayScreen extends StatefulWidget {
 
 class _TodayScreenState extends State<TodayScreen> {
   final List<Task> _tasks = [
-    Task(id: '1', title: 'Read Chapter 7 — Organic Chem', subject: 'Chemistry', priority: Priority.high),
-    Task(id: '2', title: 'Complete Math problem set', subject: 'Mathematics', isDone: true, priority: Priority.medium),
-    Task(id: '3', title: 'Write essay draft', subject: 'English Lit', priority: Priority.medium),
-    Task(id: '4', title: 'Review lecture notes', subject: 'Physics', priority: Priority.low),
-    Task(id: '5', title: 'Prepare for quiz', subject: 'History', priority: Priority.high),
+    Task(
+      id: '1', title: 'Read Chapter 7 — Organic Chem',
+      subject: 'Chemistry', priority: Priority.high,
+      dueDate: DateTime.now(),
+    ),
+    Task(
+      id: '2', title: 'Complete Math problem set',
+      subject: 'Mathematics', isDone: true, priority: Priority.medium,
+      dueDate: DateTime.now(), completedAt: DateTime.now(),
+    ),
+    Task(
+      id: '3', title: 'Write essay draft',
+      subject: 'English Lit', priority: Priority.medium,
+      dueDate: DateTime.now(),
+    ),
+    Task(
+      id: '4', title: 'Review lecture notes',
+      subject: 'Physics', priority: Priority.low,
+      dueDate: DateTime.now().add(const Duration(days: 2)),
+    ),
+    Task(
+      id: '5', title: 'Prepare for quiz',
+      subject: 'History', priority: Priority.high,
+      dueDate: DateTime.now().add(const Duration(days: 5)),
+    ),
+    Task(
+      id: '6', title: 'Chapter 9 summary',
+      subject: 'History', priority: Priority.medium,
+      dueDate: DateTime.now().add(const Duration(days: 20)),
+    ),
   ];
 
-  final TextEditingController _addCtrl = TextEditingController();
-  String _selectedSubject = 'General';
-  Priority _selectedPriority = Priority.medium;
+  Timer? _cleanupTimer;
 
-  int get _doneCount => _tasks.where((t) => t.isDone).length;
-
-  void _toggleTask(String id) {
-    setState(() {
-      final idx = _tasks.indexWhere((t) => t.id == id);
-      if (idx != -1) _tasks[idx] = _tasks[idx].copyWith(isDone: !_tasks[idx].isDone);
+  @override
+  void initState() {
+    super.initState();
+    // Auto-prune completed tasks after 24 h
+    _cleanupTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() => _tasks.removeWhere((t) => t.isExpiredCompleted));
     });
   }
 
-  void _addTask() {
-    if (_addCtrl.text.trim().isEmpty) return;
+  @override
+  void dispose() {
+    _cleanupTimer?.cancel();
+    super.dispose();
+  }
+
+  // ── Computed groups ───────────────────────────────────────────────────────
+  List<Task> get _dailyTasks =>
+      _tasks.where((t) => !t.isDone && _isToday(t.dueDate)).toList();
+
+  List<Task> get _completedTasks =>
+      _tasks.where((t) => t.isDone && !t.isExpiredCompleted).toList();
+
+  List<Task> get _weeklyTasks => _tasks
+      .where((t) => !t.isDone && _isThisWeek(t.dueDate) && !_isToday(t.dueDate))
+      .toList();
+
+  List<Task> get _monthlyTasks => _tasks
+      .where((t) => !t.isDone && _isThisMonth(t.dueDate) && !_isThisWeek(t.dueDate))
+      .toList();
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  void _toggleTask(String id) {
     setState(() {
-      _tasks.add(Task(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        title: _addCtrl.text.trim(),
-        subject: _selectedSubject,
-        priority: _selectedPriority,
-      ));
-      _addCtrl.clear();
+      final idx = _tasks.indexWhere((t) => t.id == id);
+      if (idx == -1) return;
+      final task = _tasks[idx];
+      final nowDone = !task.isDone;
+      _tasks[idx] = Task(
+        id: task.id, title: task.title, subject: task.subject,
+        isDone: nowDone, priority: task.priority, dueDate: task.dueDate,
+        completedAt: nowDone ? DateTime.now() : null,
+      );
     });
-    Navigator.pop(context);
+  }
+
+  void _deleteTask(String id) {
+    setState(() => _tasks.removeWhere((t) => t.id == id));
   }
 
   void _showAddSheet() {
@@ -1124,95 +1242,205 @@ class _TodayScreenState extends State<TodayScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _AddTaskSheet(
-        controller: _addCtrl,
-        selectedSubject: _selectedSubject,
-        selectedPriority: _selectedPriority,
-        onSubjectChanged: (s) => setState(() => _selectedSubject = s),
-        onPriorityChanged: (p) => setState(() => _selectedPriority = p),
-        onAdd: _addTask,
+      builder: (ctx) => _AddTaskSheet(
+        onAdd: (title, subject, priority, dueDate) {
+          setState(() {
+            _tasks.add(Task(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              title: title,
+              subject: subject,
+              priority: priority,
+              dueDate: dueDate,
+            ));
+          });
+          Navigator.pop(ctx);
+        },
       ),
     );
   }
 
   @override
-  void dispose() {
-    _addCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final pending = _tasks.where((t) => !t.isDone).toList();
-    final done = _tasks.where((t) => t.isDone).toList();
+    final todayAll = _tasks.where((t) => _isToday(t.dueDate)).toList();
+    final todayDone = todayAll.where((t) => t.isDone).length;
 
     return Scaffold(
       backgroundColor: CeladonColors.cream,
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddSheet,
-        backgroundColor: CeladonColors.sage,
-        foregroundColor: Colors.white,
-        elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: const Icon(Icons.add_rounded, size: 28),
-      ),
       body: NotebookBackground(
         child: SafeArea(
-          child: CustomScrollView(
-            slivers: [
-              // ── Header with mini calendar ──
-              SliverToBoxAdapter(
-                child: ScreenHeader(
-                  eyebrow: _weekdayFull(now.weekday).toUpperCase(),
-                  title: '${now.day} ${_monthShort(now.month)}',
-                  todayTasks: _tasks,
-                ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+
+              // ── Header ────────────────────────────────────────────────────
+              ScreenHeader(
+                eyebrow: _weekdayFull(now.weekday).toUpperCase(),
+                title: '${now.day} ${_monthShort(now.month)}',
+                todayTasks: _dailyTasks,
               ),
 
-              // ── Progress ──
-              SliverToBoxAdapter(
+              // ── Today's progress ──────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(64, 14, 20, 0),
+                child: _ProgressBar(done: todayDone, total: todayAll.length),
+              ),
+
+              const SizedBox(height: 10),
+
+              // ── Main split ────────────────────────────────────────────────
+              Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(64, 20, 20, 8),
-                  child: _ProgressBar(done: _doneCount, total: _tasks.length),
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+
+                      // ─ LEFT: scrollable task panel in Stack (brown border) ─
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            Container(
+                              decoration: BoxDecoration(
+                                color: CeladonColors.pageWhite,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: CeladonColors.calBrown.withAlpha(210),
+                                  width: 1.8,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: CeladonColors.softShadow,
+                                    blurRadius: 10,
+                                    offset: Offset(2, 4),
+                                  ),
+                                ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(19),
+                                child: SingleChildScrollView(
+                                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 60),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+
+                                      // TODAY ────────────────────────────────
+                                      _TaskSectionLabel(
+                                        label: 'TODAY',
+                                        count: _dailyTasks.length,
+                                        color: CeladonColors.terracotta,
+                                      ),
+                                      if (_dailyTasks.isEmpty)
+                                        const _EmptySection(message: 'All done! 🎉'),
+                                      ..._dailyTasks.map((t) => _CompactTaskCard(
+                                            task: t,
+                                            onToggle: () => _toggleTask(t.id),
+                                            onDelete: () => _deleteTask(t.id),
+                                          )),
+
+                                      // COMPLETED ────────────────────────────
+                                      if (_completedTasks.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        _TaskSectionLabel(
+                                          label: 'DONE',
+                                          count: _completedTasks.length,
+                                          color: CeladonColors.sage,
+                                          subtitle: '· clears in 24h',
+                                        ),
+                                        ..._completedTasks.map((t) => _CompactTaskCard(
+                                              task: t,
+                                              onToggle: () => _toggleTask(t.id),
+                                              onDelete: () => _deleteTask(t.id),
+                                            )),
+                                      ],
+
+                                      // THIS WEEK ────────────────────────────
+                                      if (_weeklyTasks.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        _TaskSectionLabel(
+                                          label: 'THIS WEEK',
+                                          count: _weeklyTasks.length,
+                                          color: const Color(0xFF6A8FA0),
+                                        ),
+                                        ..._weeklyTasks.map((t) => _CompactTaskCard(
+                                              task: t,
+                                              onToggle: () => _toggleTask(t.id),
+                                              onDelete: () => _deleteTask(t.id),
+                                            )),
+                                      ],
+
+                                      // THIS MONTH ───────────────────────────
+                                      if (_monthlyTasks.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        _TaskSectionLabel(
+                                          label: 'THIS MONTH',
+                                          count: _monthlyTasks.length,
+                                          color: const Color(0xFF9B8EA0),
+                                        ),
+                                        ..._monthlyTasks.map((t) => _CompactTaskCard(
+                                              task: t,
+                                              onToggle: () => _toggleTask(t.id),
+                                              onDelete: () => _deleteTask(t.id),
+                                            )),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // ─ + button pinned bottom-right inside the panel ──
+                            Positioned(
+                              bottom: 12,
+                              right: 12,
+                              child: GestureDetector(
+                                onTap: _showAddSheet,
+                                child: Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: CeladonColors.sage,
+                                    borderRadius: BorderRadius.circular(12),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: CeladonColors.sage.withAlpha(90),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.add_rounded,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(width: 8),
+
+                      // ─ RIGHT: Bear + quote + water (fixed narrow width) ────
+                      SizedBox(
+                        width: 148,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: const [
+                            Expanded(child: _BearWidget()),
+                            SizedBox(height: 6),
+                            _WaterReminderCard(),
+                            SizedBox(height: 6),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 
-              const SliverToBoxAdapter(child: SizedBox(height: 16)),
-
-              // ── Pending ──
-              if (pending.isNotEmpty) ...[
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(64, 0, 20, 8),
-                    child: Text('TO DO  ·  ${pending.length}',
-                        style: const TextStyle(fontSize: 11, letterSpacing: 1.5,
-                            color: CeladonColors.mutedSage, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                SliverList(delegate: SliverChildBuilderDelegate(
-                  (ctx, i) => TaskCard(task: pending[i], onToggle: () => _toggleTask(pending[i].id)),
-                  childCount: pending.length,
-                )),
-              ],
-
-              // ── Done ──
-              if (done.isNotEmpty) ...[
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(64, 20, 20, 8),
-                    child: Text('DONE  ·  ${done.length}',
-                        style: const TextStyle(fontSize: 11, letterSpacing: 1.5,
-                            color: CeladonColors.mutedSage, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                SliverList(delegate: SliverChildBuilderDelegate(
-                  (ctx, i) => TaskCard(task: done[i], onToggle: () => _toggleTask(done[i].id)),
-                  childCount: done.length,
-                )),
-              ],
-
-              const SliverToBoxAdapter(child: SizedBox(height: 100)),
             ],
           ),
         ),
@@ -1220,8 +1448,10 @@ class _TodayScreenState extends State<TodayScreen> {
     );
   }
 
-  String _weekdayFull(int d) => ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d];
-  String _monthShort(int m) => ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m];
+  String _weekdayFull(int d) =>
+      ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d];
+  String _monthShort(int m) =>
+      ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m];
 }
 
 // ─── PROGRESS BAR ────────────────────────────────────────────────────────────
@@ -1354,36 +1584,89 @@ class TaskCard extends StatelessWidget {
 // ─── ADD TASK SHEET ───────────────────────────────────────────────────────────
 
 class _AddTaskSheet extends StatefulWidget {
-  final TextEditingController controller;
-  final String selectedSubject;
-  final Priority selectedPriority;
-  final ValueChanged<String> onSubjectChanged;
-  final ValueChanged<Priority> onPriorityChanged;
-  final VoidCallback onAdd;
-
-  const _AddTaskSheet({
-    required this.controller,
-    required this.selectedSubject,
-    required this.selectedPriority,
-    required this.onSubjectChanged,
-    required this.onPriorityChanged,
-    required this.onAdd,
-  });
+  /// Called with (title, subject, priority, dueDate) when the user taps add.
+  final void Function(String title, String subject, Priority priority, DateTime dueDate) onAdd;
+  const _AddTaskSheet({required this.onAdd});
 
   @override
   State<_AddTaskSheet> createState() => _AddTaskSheetState();
 }
 
 class _AddTaskSheetState extends State<_AddTaskSheet> {
-  late String _subject;
-  late Priority _priority;
-  final _subjects = ['General', 'Mathematics', 'Physics', 'Chemistry', 'English Lit', 'History', 'Biology', 'CS'];
+  final _titleCtrl = TextEditingController();
+  final _customSubjectCtrl = TextEditingController();
+  String _subject = 'General';
+  bool _useCustomSubject = false;
+  Priority _priority = Priority.medium;
+  late DateTime _dueDate;
+
+  final _subjects = [
+    'General', 'Mathematics', 'Physics', 'Chemistry',
+    'English Lit', 'History', 'Biology', 'CS',
+  ];
 
   @override
   void initState() {
     super.initState();
-    _subject = widget.selectedSubject;
-    _priority = widget.selectedPriority;
+    _dueDate = DateTime.now();
+  }
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _customSubjectCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dueDate,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      builder: (ctx, child) => Theme(
+        data: ThemeData(
+          colorScheme: const ColorScheme.light(
+            primary: CeladonColors.sage,
+            onPrimary: Colors.white,
+            surface: CeladonColors.pageWhite,
+            onSurface: CeladonColors.inkBrown,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null && mounted) setState(() => _dueDate = picked);
+  }
+
+  bool get _isToday {
+    final now = DateTime.now();
+    return _dueDate.year == now.year &&
+        _dueDate.month == now.month &&
+        _dueDate.day == now.day;
+  }
+
+  String get _dateLabel {
+    if (_isToday) return 'Today';
+    final tom = DateTime.now().add(const Duration(days: 1));
+    if (_dueDate.year == tom.year && _dueDate.month == tom.month && _dueDate.day == tom.day) {
+      return 'Tomorrow';
+    }
+    const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${_dueDate.day} ${months[_dueDate.month]}';
+  }
+
+  String get _effectiveSubject =>
+      _useCustomSubject && _customSubjectCtrl.text.trim().isNotEmpty
+          ? _customSubjectCtrl.text.trim()
+          : _subject;
+
+  void _submit() {
+    final title = _titleCtrl.text.trim();
+    if (title.isEmpty) return;
+    widget.onAdd(title, _effectiveSubject, _priority, _dueDate);
   }
 
   @override
@@ -1400,96 +1683,676 @@ class _AddTaskSheetState extends State<_AddTaskSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Drag handle
             Center(
-              child: Container(width: 40, height: 4,
-                  decoration: BoxDecoration(color: CeladonColors.ruleLine, borderRadius: BorderRadius.circular(2))),
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: CeladonColors.ruleLine,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
             const SizedBox(height: 20),
-            const Text('New Task', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown)),
+            const Text(
+              'New Task',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown),
+            ),
             const SizedBox(height: 16),
+
+            // ── Task title ───────────────────────────────────────────────
             TextField(
-              controller: widget.controller,
+              controller: _titleCtrl,
               autofocus: true,
               style: const TextStyle(fontSize: 15, color: CeladonColors.inkBrown),
               decoration: InputDecoration(
                 hintText: 'What do you need to do?',
                 hintStyle: const TextStyle(color: CeladonColors.mutedSage),
                 filled: true, fillColor: CeladonColors.cream,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: CeladonColors.ruleLine),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: CeladonColors.ruleLine),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5),
+                ),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               ),
-              onSubmitted: (_) => widget.onAdd(),
+              onSubmitted: (_) => _submit(),
             ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 36,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _subjects.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final s = _subjects[i];
-                  final sel = s == _subject;
-                  return GestureDetector(
-                    onTap: () { setState(() => _subject = s); widget.onSubjectChanged(s); },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: sel ? CeladonColors.sage : CeladonColors.cream,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: sel ? CeladonColors.sage : CeladonColors.ruleLine),
-                      ),
-                      child: Text(s, style: TextStyle(fontSize: 12,
-                          fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
-                          color: sel ? Colors.white : CeladonColors.inkBrown)),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
+
+            // ── Date + Priority row ───────────────────────────────────────
             Row(
               children: [
-                const Text('Priority:', style: TextStyle(fontSize: 13, color: CeladonColors.inkBrown)),
-                const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: _pickDate,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: _isToday ? CeladonColors.cream : CeladonColors.sageLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _isToday ? CeladonColors.ruleLine : CeladonColors.sage,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.calendar_today_rounded,
+                          size: 13,
+                          color: _isToday ? CeladonColors.mutedSage : CeladonColors.sage,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _dateLabel,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _isToday ? CeladonColors.inkBrown : CeladonColors.sage,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(),
                 for (final p in Priority.values)
                   GestureDetector(
-                    onTap: () { setState(() => _priority = p); widget.onPriorityChanged(p); },
+                    onTap: () => setState(() => _priority = p),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      margin: const EdgeInsets.only(left: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                       decoration: BoxDecoration(
                         color: _priority == p ? p.color.withAlpha(30) : Colors.transparent,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: _priority == p ? p.color : CeladonColors.ruleLine),
+                        border: Border.all(
+                          color: _priority == p ? p.color : CeladonColors.ruleLine,
+                        ),
                       ),
-                      child: Text(p.label, style: TextStyle(fontSize: 12,
+                      child: Text(
+                        p.label,
+                        style: TextStyle(
+                          fontSize: 11,
                           fontWeight: _priority == p ? FontWeight.w600 : FontWeight.w400,
-                          color: _priority == p ? p.color : CeladonColors.mutedSage)),
+                          color: _priority == p ? p.color : CeladonColors.mutedSage,
+                        ),
+                      ),
                     ),
                   ),
               ],
             ),
+            const SizedBox(height: 12),
+
+            // ── Subject ───────────────────────────────────────────────────
+            Row(
+              children: [
+                const Text(
+                  'Subject:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: CeladonColors.inkBrown,
+                  ),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => setState(() {
+                    _useCustomSubject = !_useCustomSubject;
+                    if (!_useCustomSubject) _customSubjectCtrl.clear();
+                  }),
+                  child: Text(
+                    _useCustomSubject ? '← Use preset' : 'Type custom ✏️',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: CeladonColors.terracotta,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            if (_useCustomSubject)
+              TextField(
+                controller: _customSubjectCtrl,
+                style: const TextStyle(fontSize: 13, color: CeladonColors.inkBrown),
+                decoration: InputDecoration(
+                  hintText: 'e.g. Art, Drama, Sports...',
+                  hintStyle: const TextStyle(color: CeladonColors.mutedSage, fontSize: 12),
+                  filled: true, fillColor: CeladonColors.cream,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: CeladonColors.ruleLine),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: CeladonColors.ruleLine),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: CeladonColors.terracotta, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+              )
+            else
+              SizedBox(
+                height: 36,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _subjects.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) {
+                    final s = _subjects[i];
+                    final sel = s == _subject;
+                    return GestureDetector(
+                      onTap: () => setState(() => _subject = s),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sel ? CeladonColors.sage : CeladonColors.cream,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: sel ? CeladonColors.sage : CeladonColors.ruleLine,
+                          ),
+                        ),
+                        child: Text(
+                          s,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
+                            color: sel ? Colors.white : CeladonColors.inkBrown,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
             const SizedBox(height: 20),
+
+            // ── Add button ────────────────────────────────────────────────
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: widget.onAdd,
+                onPressed: _submit,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: CeladonColors.sage, foregroundColor: Colors.white,
+                  backgroundColor: CeladonColors.sage,
+                  foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
                 ),
-                child: const Text('Add to today', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: 0.3)),
+                child: Text(
+                  _isToday ? 'Add to Today' : 'Schedule for $_dateLabel',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: 0.3),
+                ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── COMPACT TASK CARD (left panel) ──────────────────────────────────────────
+
+class _CompactTaskCard extends StatelessWidget {
+  final Task task;
+  final VoidCallback onToggle;
+  final VoidCallback onDelete;
+  const _CompactTaskCard({
+    required this.task,
+    required this.onToggle,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dismissible(
+      key: Key('cmp-${task.id}'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => onDelete(),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFD96060),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 16),
+      ),
+      child: GestureDetector(
+        onTap: onToggle,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: task.isDone
+                ? CeladonColors.ruleLine.withAlpha(60)
+                : CeladonColors.cream,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: task.isDone
+                  ? CeladonColors.ruleLine
+                  : task.priority.color.withAlpha(60),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 16, height: 16,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: task.isDone ? CeladonColors.sage : Colors.transparent,
+                    border: Border.all(
+                      color: task.isDone ? CeladonColors.sage : CeladonColors.mutedSage,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: task.isDone
+                      ? const Icon(Icons.check_rounded, size: 9, color: Colors.white)
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      task.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: task.isDone ? CeladonColors.mutedSage : CeladonColors.inkBrown,
+                        decoration: task.isDone ? TextDecoration.lineThrough : null,
+                        decorationColor: CeladonColors.mutedSage,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Container(
+                          width: 5, height: 5,
+                          decoration: BoxDecoration(
+                            color: task.priority.color.withAlpha(task.isDone ? 100 : 200),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            task.subject,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 9.5, color: CeladonColors.mutedSage),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── TASK SECTION LABEL ───────────────────────────────────────────────────────
+
+class _TaskSectionLabel extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color;
+  final String? subtitle;
+  const _TaskSectionLabel({
+    required this.label,
+    required this.count,
+    required this.color,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Container(
+            width: 3, height: 13,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              color: color,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: color.withAlpha(28),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.w700),
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(width: 4),
+            Text(
+              subtitle!,
+              style: const TextStyle(fontSize: 9, color: CeladonColors.mutedSage),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─── EMPTY SECTION PLACEHOLDER ────────────────────────────────────────────────
+
+class _EmptySection extends StatelessWidget {
+  final String message;
+  const _EmptySection({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Text(
+          message,
+          style: const TextStyle(
+            fontSize: 11,
+            color: CeladonColors.mutedSage,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── BEAR WIDGET ──────────────────────────────────────────────────────────────
+
+class _BearWidget extends StatefulWidget {
+  const _BearWidget();
+
+  @override
+  State<_BearWidget> createState() => _BearWidgetState();
+}
+
+class _BearWidgetState extends State<_BearWidget> {
+  static const _quotes = [
+    '"You\'re doing amazing!\nKeep going! 🌟"',
+    '"Every step forward\nbrings you closer! 📚"',
+    '"Believe in yourself —\nyou\'ve got this! 💪"',
+    '"Focus now,\nshine later! ✨"',
+    '"One task at a time,\nyou\'ll get there! 🎯"',
+    '"Your hard work\nwill pay off! 🌱"',
+    '"Stay curious,\nstay brilliant! 🔍"',
+    '"Great things take time.\nBe patient! ⏳"',
+  ];
+
+  int _quoteIdx = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (mounted) setState(() => _quoteIdx = (_quoteIdx + 1) % _quotes.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Bear drawing fills whatever height is available
+        Expanded(
+          child: CustomPaint(
+            painter: _BearPainter(),
+            child: const SizedBox.expand(),
+          ),
+        ),
+        const SizedBox(height: 6),
+        // Rotating motivational quote
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 500),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          child: Container(
+            key: ValueKey(_quoteIdx),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: CeladonColors.sageLight,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: CeladonColors.mutedSage.withAlpha(80)),
+            ),
+            child: Text(
+              _quotes[_quoteIdx],
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 10,
+                color: CeladonColors.inkBrown,
+                fontStyle: FontStyle.italic,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── BEAR CUSTOM PAINTER ──────────────────────────────────────────────────────
+
+class _BearPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height * 0.50;
+    final r = math.min(size.width, size.height) * 0.26;
+
+    const furBrown    = Color(0xFFBE7B4A);
+    const furLighter  = Color(0xFFD49A60);
+    const bodyGreen   = CeladonColors.sage;
+    const muzzleCream = Color(0xFFEDD9B5);
+    const darkBrown   = Color(0xFF2C2416);
+    const innerEar    = Color(0xFFE8A070);
+    final cheekPink   = const Color(0xFFE8806A).withAlpha(75);
+
+    // Body / sweater ────────────────────────────────────────────────────────
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(cx, cy + r + r * 0.50),
+          width: r * 1.9,
+          height: r * 1.15,
+        ),
+        Radius.circular(r * 0.55),
+      ),
+      Paint()..color = bodyGreen,
+    );
+
+    // Arms + paws ────────────────────────────────────────────────────────────
+    for (final s in [-1.0, 1.0]) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+            center: Offset(cx + s * r * 1.02, cy + r * 0.40),
+            width: r * 0.46,
+            height: r * 0.86,
+          ),
+          Radius.circular(r * 0.23),
+        ),
+        Paint()..color = furBrown,
+      );
+      canvas.drawCircle(
+        Offset(cx + s * r * 1.02, cy + r * 0.88),
+        r * 0.21,
+        Paint()..color = furLighter,
+      );
+    }
+
+    // Ears (behind head) ─────────────────────────────────────────────────────
+    for (final s in [-1.0, 1.0]) {
+      canvas.drawCircle(
+        Offset(cx + s * r * 0.65, cy - r * 0.75),
+        r * 0.32,
+        Paint()..color = furBrown,
+      );
+      canvas.drawCircle(
+        Offset(cx + s * r * 0.65, cy - r * 0.75),
+        r * 0.17,
+        Paint()..color = innerEar,
+      );
+    }
+
+    // Head ────────────────────────────────────────────────────────────────────
+    canvas.drawCircle(Offset(cx, cy), r, Paint()..color = furBrown);
+
+    // Muzzle ──────────────────────────────────────────────────────────────────
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(cx, cy + r * 0.25),
+        width: r * 0.84,
+        height: r * 0.58,
+      ),
+      Paint()..color = muzzleCream,
+    );
+
+    // Rosy cheeks ─────────────────────────────────────────────────────────────
+    canvas.drawCircle(Offset(cx - r * 0.42, cy + r * 0.15), r * 0.17, Paint()..color = cheekPink);
+    canvas.drawCircle(Offset(cx + r * 0.42, cy + r * 0.15), r * 0.17, Paint()..color = cheekPink);
+
+    // Eyes (white sclera + dark pupil + sparkle) ──────────────────────────────
+    for (final s in [-1.0, 1.0]) {
+      final ex = cx + s * r * 0.27;
+      final ey = cy - r * 0.08;
+      canvas.drawCircle(Offset(ex, ey), r * 0.13, Paint()..color = Colors.white);
+      canvas.drawCircle(Offset(ex + r * 0.04, ey), r * 0.085, Paint()..color = darkBrown);
+      canvas.drawCircle(Offset(ex + r * 0.07, ey - r * 0.05), r * 0.028, Paint()..color = Colors.white);
+    }
+
+    // Nose ────────────────────────────────────────────────────────────────────
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(cx, cy + r * 0.06),
+        width: r * 0.21,
+        height: r * 0.13,
+      ),
+      Paint()..color = darkBrown,
+    );
+
+    // Smile ───────────────────────────────────────────────────────────────────
+    canvas.drawPath(
+      Path()
+        ..moveTo(cx - r * 0.15, cy + r * 0.23)
+        ..quadraticBezierTo(cx, cy + r * 0.37, cx + r * 0.15, cy + r * 0.23),
+      Paint()
+        ..color = darkBrown
+        ..strokeWidth = r * 0.055
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
+}
+
+// ─── WATER REMINDER CARD ──────────────────────────────────────────────────────
+
+class _WaterReminderCard extends StatelessWidget {
+  const _WaterReminderCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFDEEDF4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFB0D4E0)),
+        boxShadow: const [
+          BoxShadow(
+            color: CeladonColors.softShadow,
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: const Row(
+        children: [
+          Text('💧', style: TextStyle(fontSize: 20)),
+          SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Drink Water!',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF3A6E8A),
+                  ),
+                ),
+                Text(
+                  'Stay hydrated today 💙',
+                  style: TextStyle(fontSize: 9.5, color: Color(0xFF6A9EB0)),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
