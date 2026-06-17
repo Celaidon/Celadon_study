@@ -43,6 +43,67 @@ class CeladonColors {
   static const calSurface   = Color(0xFF7A4F2D);
 }
 
+// ─── THEME-AWARE COLOR TOKENS ────────────────────────────────────────────────
+// Use `context.ct` to get the right palette for current brightness.
+// This keeps CeladonColors (const) for legacy use in const contexts.
+
+class CeladonTheme {
+  final Color bg;          // scaffold / page background
+  final Color surface;     // card / panel surface
+  final Color surfaceAlt;  // slightly elevated surface (nav bar etc.)
+  final Color border;      // dividers and rule lines
+  final Color textPrimary; // main body text
+  final Color textSecondary; // captions, labels
+  final Color sage;        // accent green
+  final Color sageLight;   // light sage chip / badge background
+  final Color terracotta;  // orange accent
+  final Color terracottaLight; // light terracotta chip background
+  final Color shadow;      // box shadow color
+
+  const CeladonTheme._({
+    required this.bg, required this.surface, required this.surfaceAlt,
+    required this.border, required this.textPrimary, required this.textSecondary,
+    required this.sage, required this.sageLight,
+    required this.terracotta, required this.terracottaLight,
+    required this.shadow,
+  });
+
+  static const light = CeladonTheme._(
+    bg:               Color(0xFFF7F3E9),
+    surface:          Color(0xFFFEFCF7),
+    surfaceAlt:       Color(0xFFFEFCF7),
+    border:           Color(0xFFE2DDD1),
+    textPrimary:      Color(0xFF2C2416),
+    textSecondary:    Color(0xFFB8C4BB),
+    sage:             Color(0xFF7C9A7E),
+    sageLight:        Color(0xFFE8F0E9),
+    terracotta:       Color(0xFFD4956A),
+    terracottaLight:  Color(0xFFFAEDE4),
+    shadow:           Color(0x14000000),
+  );
+
+  static const dark = CeladonTheme._(
+    bg:               Color(0xFF1A1610),
+    surface:          Color(0xFF252016),
+    surfaceAlt:       Color(0xFF2E2820),
+    border:           Color(0xFF3A342A),
+    textPrimary:      Color(0xFFEDE8DF),
+    textSecondary:    Color(0xFF8A9490),
+    sage:             Color(0xFF8FB491),
+    sageLight:        Color(0xFF232E24),
+    terracotta:       Color(0xFFD4956A),
+    terracottaLight:  Color(0xFF2E2018),
+    shadow:           Color(0x40000000),
+  );
+}
+
+extension CeladonThemeExt on BuildContext {
+  CeladonTheme get ct =>
+      Theme.of(this).brightness == Brightness.dark ? CeladonTheme.dark : CeladonTheme.light;
+  bool get isDark => Theme.of(this).brightness == Brightness.dark;
+}
+
+
 // ─── PRESSABLE (shared hover-lift animation) ────────────────────────────────
 //
 // Wrap any tappable widget to get a tactile hover response on devices with a
@@ -1274,21 +1335,34 @@ class _CeladonAppState extends State<CeladonApp> {
   void _onStateChange() => setState(() {});
 
   ThemeData _buildTheme(bool dark) {
+    final ct = dark ? CeladonTheme.dark : CeladonTheme.light;
     return ThemeData(
       fontFamily: 'Georgia',
       brightness: dark ? Brightness.dark : Brightness.light,
-      scaffoldBackgroundColor: dark ? const Color(0xFF1E1A14) : CeladonColors.cream,
+      scaffoldBackgroundColor: ct.bg,
+      cardColor: ct.surface,
+      dividerColor: ct.border,
       colorScheme: dark
-          ? const ColorScheme.dark(
-              primary: CeladonColors.sage,
-              secondary: CeladonColors.terracotta,
-              surface: Color(0xFF2A2318),
+          ? ColorScheme.dark(
+              primary: ct.sage,
+              secondary: ct.terracotta,
+              surface: ct.surface,
+              onSurface: ct.textPrimary,
             )
-          : const ColorScheme.light(
-              primary: CeladonColors.sage,
-              secondary: CeladonColors.terracotta,
-              surface: CeladonColors.pageWhite,
+          : ColorScheme.light(
+              primary: ct.sage,
+              secondary: ct.terracotta,
+              surface: ct.surface,
+              onSurface: ct.textPrimary,
             ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: ct.surface,
+        labelStyle: TextStyle(color: ct.textSecondary),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: ct.border)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: ct.border)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: ct.sage, width: 1.5)),
+      ),
       useMaterial3: true,
     );
   }
@@ -1401,8 +1475,9 @@ class _MainShellState extends State<MainShell> {
       const SyllabusScreen(),
     ];
 
+    final ct = context.ct;
     return Scaffold(
-      backgroundColor: CeladonColors.cream,
+      backgroundColor: ct.bg,
       body: screens[_currentIndex],
       bottomNavigationBar: _NotebookNavBar(
         currentIndex: _currentIndex,
@@ -1425,11 +1500,12 @@ class _NotebookNavBar extends StatelessWidget {
       (Icons.route_rounded, 'Roadmap'),
     ];
 
+    final ct = context.ct;
     return Container(
-      decoration: const BoxDecoration(
-        color: CeladonColors.pageWhite,
-        border: Border(top: BorderSide(color: CeladonColors.ruleLine, width: 1.5)),
-        boxShadow: [BoxShadow(color: CeladonColors.softShadow, blurRadius: 12, offset: Offset(0, -4))],
+      decoration: BoxDecoration(
+        color: ct.surfaceAlt,
+        border: Border(top: BorderSide(color: ct.border, width: 1.5)),
+        boxShadow: [BoxShadow(color: ct.shadow, blurRadius: 12, offset: const Offset(0, -4))],
       ),
       child: SafeArea(
         top: false,
@@ -1447,7 +1523,7 @@ class _NotebookNavBar extends StatelessWidget {
                     curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                     decoration: BoxDecoration(
-                      color: currentIndex == i ? CeladonColors.sageLight : Colors.transparent,
+                      color: currentIndex == i ? ct.sageLight : Colors.transparent,
                       borderRadius: BorderRadius.circular(24),
                     ),
                     child: Column(
@@ -1459,7 +1535,7 @@ class _NotebookNavBar extends StatelessWidget {
                           curve: Curves.easeOutBack,
                           builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
                           child: Icon(items[i].$1,
-                              color: currentIndex == i ? CeladonColors.sage : CeladonColors.mutedSage,
+                              color: currentIndex == i ? ct.sage : ct.textSecondary,
                               size: 22),
                         ),
                         const SizedBox(height: 3),
@@ -1467,7 +1543,7 @@ class _NotebookNavBar extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: currentIndex == i ? FontWeight.w700 : FontWeight.w400,
-                              color: currentIndex == i ? CeladonColors.sage : CeladonColors.mutedSage,
+                              color: currentIndex == i ? ct.sage : ct.textSecondary,
                               letterSpacing: 0.3,
                             )),
                       ],
@@ -1490,15 +1566,23 @@ class NotebookBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(painter: _RuledLinePainter(), child: child);
+    final ct = context.ct;
+    return CustomPaint(
+      painter: _RuledLinePainter(lineColor: ct.border, marginColor: ct.border.withAlpha(80)),
+      child: child,
+    );
   }
 }
 
 class _RuledLinePainter extends CustomPainter {
+  final Color lineColor;
+  final Color marginColor;
+  const _RuledLinePainter({required this.lineColor, required this.marginColor});
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = CeladonColors.ruleLine
+      ..color = lineColor
       ..strokeWidth = 0.8;
     const lineSpacing = 28.0;
     const startY = 80.0;
@@ -1506,13 +1590,14 @@ class _RuledLinePainter extends CustomPainter {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
     final marginPaint = Paint()
-      ..color = const Color(0xFFE8BBBB)
+      ..color = marginColor
       ..strokeWidth = 1.2;
     canvas.drawLine(const Offset(52, 0), Offset(52, size.height), marginPaint);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _RuledLinePainter old) =>
+      old.lineColor != lineColor || old.marginColor != marginColor;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2336,15 +2421,14 @@ class ScreenHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ct = context.ct;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Mini calendar — top left
           MiniCalendarWidget(todayTasks: todayTasks),
           const SizedBox(width: 14),
-          // Title block
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -2353,9 +2437,9 @@ class ScreenHeader extends StatelessWidget {
                 children: [
                   Text(
                     eyebrow,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: CeladonColors.terracotta,
+                      color: ct.terracotta,
                       letterSpacing: 1.8,
                       fontWeight: FontWeight.w600,
                     ),
@@ -2363,11 +2447,11 @@ class ScreenHeader extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'Georgia',
                       fontSize: 32,
                       fontWeight: FontWeight.w700,
-                      color: CeladonColors.inkBrown,
+                      color: ct.textPrimary,
                       height: 1.1,
                     ),
                   ),
@@ -2376,7 +2460,6 @@ class ScreenHeader extends StatelessWidget {
               ),
             ),
           ),
-          // Profile avatar — top right
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: _ProfileAvatar(),
@@ -2412,6 +2495,7 @@ class _ProfileAvatarState extends State<_ProfileAvatar> {
 
   @override
   Widget build(BuildContext context) {
+    final ct = context.ct;
     final bytes   = _appState.profileBytes;
     final initial = _appState.userEmail.isNotEmpty
         ? _appState.userEmail[0].toUpperCase()
@@ -2425,15 +2509,15 @@ class _ProfileAvatarState extends State<_ProfileAvatar> {
           width: 40, height: 40,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: CeladonColors.terracottaLight,
-            border: Border.all(color: CeladonColors.terracotta.withAlpha(120), width: 2),
+            color: ct.terracottaLight,
+            border: Border.all(color: ct.terracotta.withAlpha(120), width: 2),
             image: bytes != null
                 ? DecorationImage(image: MemoryImage(bytes), fit: BoxFit.cover)
                 : null,
-            boxShadow: [BoxShadow(color: CeladonColors.softShadow, blurRadius: 6, offset: const Offset(0, 2))],
+            boxShadow: [BoxShadow(color: ct.shadow, blurRadius: 6, offset: const Offset(0, 2))],
           ),
           child: bytes == null
-              ? Center(child: Text(initial, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.terracotta)))
+              ? Center(child: Text(initial, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ct.terracotta)))
               : null,
         ),
       ),
@@ -2500,28 +2584,25 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
 
   @override
   Widget build(BuildContext context) {
-    final dark    = _appState.darkMode;
-    final bytes   = _appState.profileBytes;
-    final email   = _appState.userEmail;
+    final ct    = context.ct;
+    final dark  = _appState.darkMode;
+    final bytes = _appState.profileBytes;
+    final email = _appState.userEmail;
     final initial = email.isNotEmpty ? email[0].toUpperCase() : '?';
     final name    = email.split('@').first;
 
-    final bg   = dark ? const Color(0xFF2A2318) : CeladonColors.pageWhite;
-    final fg   = dark ? CeladonColors.cream : CeladonColors.inkBrown;
-    final rule = dark ? const Color(0xFF3A3020) : CeladonColors.ruleLine;
-
     return Container(
       decoration: BoxDecoration(
-        color: bg,
+        color: ct.surfaceAlt,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 20)],
+        boxShadow: [BoxShadow(color: ct.shadow, blurRadius: 20)],
       ),
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           // Drag handle
-          Container(width: 36, height: 4, decoration: BoxDecoration(color: rule, borderRadius: BorderRadius.circular(2))),
+          Container(width: 36, height: 4, decoration: BoxDecoration(color: ct.border, borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 20),
 
           // Avatar + name
@@ -2549,7 +2630,7 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
                   decoration: BoxDecoration(
                     color: CeladonColors.sage,
                     shape: BoxShape.circle,
-                    border: Border.all(color: bg, width: 2),
+                    border: Border.all(color: ct.surfaceAlt, width: 2),
                   ),
                   child: const Icon(Icons.camera_alt_rounded, size: 12, color: Colors.white),
                 ),
@@ -2557,7 +2638,7 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
             ),
           ),
           const SizedBox(height: 10),
-          Text(name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: fg)),
+          Text(name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ct.textPrimary)),
           Text(email, style: const TextStyle(fontSize: 11, color: CeladonColors.mutedSage)),
           const SizedBox(height: 6),
           GestureDetector(
@@ -2566,7 +2647,7 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
           ),
           const SizedBox(height: 20),
 
-          Divider(color: rule, height: 1),
+          Divider(color: ct.border, height: 1),
           const SizedBox(height: 8),
 
           // ── Reset password (expandable)
@@ -2574,7 +2655,7 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
             icon: Icons.lock_reset_rounded,
             label: 'Reset Password',
             color: CeladonColors.terracotta,
-            fg: fg,
+            fg: ct.textPrimary,
             trailing: Icon(_resetting ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 18, color: CeladonColors.mutedSage),
             onTap: () => setState(() { _resetting = !_resetting; _resetError = null; _resetSuccess = null; }),
           ),
@@ -2612,14 +2693,14 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
             const SizedBox(height: 8),
           ],
 
-          Divider(color: rule, height: 1),
+          Divider(color: ct.border, height: 1),
 
           // ── Theme toggle
           _SheetTile(
             icon: dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
             label: dark ? 'Switch to Light Theme' : 'Switch to Dark Theme',
             color: CeladonColors.sage,
-            fg: fg,
+            fg: ct.textPrimary,
             trailing: Switch(
               value: dark,
               activeThumbColor: CeladonColors.sage,
@@ -2628,27 +2709,27 @@ class _ProfileSheetContentState extends State<_ProfileSheetContent> {
             onTap: () { _appState.toggleDark(); setState(() {}); },
           ),
 
-          Divider(color: rule, height: 1),
+          Divider(color: ct.border, height: 1),
 
           // ── Contact support
           _SheetTile(
             icon: Icons.support_agent_rounded,
-            label: 'Contact Support',
+            label: 'Contact',
             color: const Color(0xFF6A8FA0),
-            fg: fg,
+            fg: ct.textPrimary,
             onTap: () {
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Support: support@celadon.app'),
-                  backgroundColor: CeladonColors.inkBrown,
-                  duration: Duration(seconds: 3),
+                  content: Text('email: vanimishra0707@gmail.com'),
+                  backgroundColor: Color.fromARGB(255, 110, 95, 69),
+                  duration: Duration(seconds: 5),
                 ),
               );
             },
           ),
 
-          Divider(color: rule, height: 1),
+          Divider(color: ct.border, height: 1),
 
           _SheetTile(
             icon: Icons.logout_rounded,
@@ -2832,10 +2913,11 @@ class _TodayScreenState extends State<TodayScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final ct = context.ct;
     if (_loading) {
-      return const Scaffold(
-        backgroundColor: CeladonColors.cream,
-        body: Center(child: CircularProgressIndicator(color: CeladonColors.sage)),
+      return Scaffold(
+        backgroundColor: ct.bg,
+        body: Center(child: CircularProgressIndicator(color: ct.sage)),
       );
     }
     final now = DateTime.now();
@@ -2843,7 +2925,7 @@ class _TodayScreenState extends State<TodayScreen> {
     final todayDone = todayAll.where((t) => t.isDone).length;
 
     return Scaffold(
-      backgroundColor: CeladonColors.cream,
+      backgroundColor: ct.bg,
       body: NotebookBackground(
         child: SafeArea(
           child: Column(
@@ -2879,17 +2961,17 @@ class _TodayScreenState extends State<TodayScreen> {
                           children: [
                             Container(
                               decoration: BoxDecoration(
-                                color: CeladonColors.pageWhite,
+                                color: ct.surface,
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
-                                  color: CeladonColors.calBrown.withAlpha(210),
+                                  color: ct.border,
                                   width: 1.8,
                                 ),
-                                boxShadow: const [
+                                boxShadow: [
                                   BoxShadow(
-                                    color: CeladonColors.softShadow,
+                                    color: ct.shadow,
                                     blurRadius: 10,
-                                    offset: Offset(2, 4),
+                                    offset: const Offset(2, 4),
                                   ),
                                 ],
                               ),
@@ -3508,8 +3590,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> with SingleTickerPro
   @override
   Widget build(BuildContext context) {
     final task = widget.task;
+    final ct = context.ct;
     return Dismissible(
-      key: Key('cmp-${task.id}'),
+      key: Key('cmp-\${task.id}'),
       direction: DismissDirection.endToStart,
       onDismissed: (_) => widget.onDelete(),
       background: Container(
@@ -3530,12 +3613,12 @@ class _CompactTaskCardState extends State<_CompactTaskCard> with SingleTickerPro
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: task.isDone
-                ? CeladonColors.ruleLine.withAlpha(60)
-                : CeladonColors.cream,
+                ? ct.border.withAlpha(60)
+                : ct.surface,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: task.isDone
-                  ? CeladonColors.ruleLine
+                  ? ct.border
                   : task.priority.color.withAlpha(60),
             ),
           ),
@@ -3552,9 +3635,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> with SingleTickerPro
                     width: 16, height: 16,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: task.isDone ? CeladonColors.sage : Colors.transparent,
+                      color: task.isDone ? ct.sage : Colors.transparent,
                       border: Border.all(
-                        color: task.isDone ? CeladonColors.sage : CeladonColors.mutedSage,
+                        color: task.isDone ? ct.sage : ct.textSecondary,
                         width: 1.5,
                       ),
                     ),
@@ -3576,9 +3659,9 @@ class _CompactTaskCardState extends State<_CompactTaskCard> with SingleTickerPro
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,
-                        color: task.isDone ? CeladonColors.mutedSage : CeladonColors.inkBrown,
+                        color: task.isDone ? ct.textSecondary : ct.textPrimary,
                         decoration: task.isDone ? TextDecoration.lineThrough : null,
-                        decorationColor: CeladonColors.mutedSage,
+                        decorationColor: ct.textSecondary,
                         height: 1.3,
                       ),
                     ),
@@ -3598,7 +3681,7 @@ class _CompactTaskCardState extends State<_CompactTaskCard> with SingleTickerPro
                             task.subject,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 9.5, color: CeladonColors.mutedSage),
+                            style: TextStyle(fontSize: 9.5, color: ct.textSecondary),
                           ),
                         ),
                       ],
@@ -3630,6 +3713,7 @@ class _TaskSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ct = context.ct;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
@@ -3659,7 +3743,7 @@ class _TaskSectionLabel extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              '$count',
+              '\$count',
               style: TextStyle(fontSize: 9, color: color, fontWeight: FontWeight.w700),
             ),
           ),
@@ -3667,7 +3751,7 @@ class _TaskSectionLabel extends StatelessWidget {
             const SizedBox(width: 4),
             Text(
               subtitle!,
-              style: const TextStyle(fontSize: 9, color: CeladonColors.mutedSage),
+              style: TextStyle(fontSize: 9, color: ct.textSecondary),
             ),
           ],
         ],
@@ -3689,9 +3773,9 @@ class _EmptySection extends StatelessWidget {
       child: Center(
         child: Text(
           message,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 11,
-            color: CeladonColors.mutedSage,
+            color: context.ct.textSecondary,
             fontStyle: FontStyle.italic,
           ),
         ),
@@ -3996,11 +4080,12 @@ class _StudyScreenState extends State<StudyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _totalActual = _subjectActualSum; // keep in sync
+    _totalActual = _subjectActualSum;
     final pctDisplay = (_progress * 100).round().clamp(0, 200);
+    final ct = context.ct;
 
     return Scaffold(
-      backgroundColor: CeladonColors.cream,
+      backgroundColor: ct.bg,
       body: NotebookBackground(
         child: SafeArea(
           child: CustomScrollView(
@@ -4020,10 +4105,10 @@ class _StudyScreenState extends State<StudyScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
                     decoration: BoxDecoration(
-                      color: CeladonColors.pageWhite,
+                      color: ct.surface,
                       borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: CeladonColors.calBrown.withAlpha(120)),
-                      boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 10, offset: Offset(0, 4))],
+                      border: Border.all(color: ct.border),
+                      boxShadow: [BoxShadow(color: ct.shadow, blurRadius: 10, offset: const Offset(0, 4))],
                     ),
                     child: Row(
                       children: [
@@ -4033,7 +4118,7 @@ class _StudyScreenState extends State<StudyScreen> {
                           child: CustomPaint(
                             painter: _ProgressRingPainter(
                               progress: _progress.clamp(0.0, 1.0),
-                              trackColor: CeladonColors.ruleLine,
+                              trackColor: ct.border,
                               fillColor: _motivationalColor,
                             ),
                             child: Center(
@@ -4064,7 +4149,7 @@ class _StudyScreenState extends State<StudyScreen> {
                                 child: _HourRow(
                                   label: 'Goal',
                                   hours: _totalGoal,
-                                  color: CeladonColors.inkBrown,
+                                  color: ct.textPrimary,
                                   icon: Icons.flag_rounded,
                                   editable: true,
                                 ),
@@ -4321,10 +4406,10 @@ class _StudySubjectRow extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(24, 0, 24, 8),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: CeladonColors.pageWhite,
+          color: context.ct.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: metGoal ? study.color.withAlpha(120) : CeladonColors.ruleLine),
-          boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 4, offset: Offset(0, 2))],
+          border: Border.all(color: metGoal ? study.color.withAlpha(120) : context.ct.border),
+          boxShadow: [BoxShadow(color: context.ct.shadow, blurRadius: 4, offset: const Offset(0, 2))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4340,7 +4425,7 @@ class _StudySubjectRow extends StatelessWidget {
                 Expanded(
                   child: Text(
                     study.name,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: context.ct.textPrimary),
                   ),
                 ),
                 if (metGoal)
@@ -4361,7 +4446,7 @@ class _StudySubjectRow extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: pct,
                 minHeight: 5,
-                backgroundColor: CeladonColors.ruleLine,
+                backgroundColor: context.ct.border,
                 valueColor: AlwaysStoppedAnimation(study.color),
               ),
             ),
@@ -4576,42 +4661,42 @@ Return ONLY the JSON array, no markdown, no explanation.
     return showDialog<(String, int)>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: CeladonColors.pageWhite,
+        backgroundColor: context.ct.bg,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('New Syllabus', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown)),
+        title: Text('New Syllabus', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: context.ct.textPrimary)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: nameCtrl,
               autofocus: true,
-              style: const TextStyle(fontSize: 14, color: CeladonColors.inkBrown),
+              style: TextStyle(fontSize: 14, color: context.ct.textPrimary),
               decoration: InputDecoration(
                 labelText: 'Subject Name',
-                labelStyle: const TextStyle(color: CeladonColors.mutedSage, fontSize: 13),
-                filled: true, fillColor: CeladonColors.cream,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
+                labelStyle: TextStyle(color: context.ct.textSecondary, fontSize: 13),
+                filled: true, fillColor: context.ct.surface,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: context.ct.border)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: context.ct.sage, width: 1.5)),
               ),
             ),
             const SizedBox(height: 14),
             TextField(
               controller: daysCtrl,
               keyboardType: TextInputType.number,
-              style: const TextStyle(fontSize: 14, color: CeladonColors.inkBrown),
+              style: TextStyle(fontSize: 14, color: context.ct.textPrimary),
               decoration: InputDecoration(
                 labelText: 'Days to finish',
-                labelStyle: const TextStyle(color: CeladonColors.mutedSage, fontSize: 13),
-                suffix: const Text('days', style: TextStyle(fontSize: 12, color: CeladonColors.mutedSage)),
-                filled: true, fillColor: CeladonColors.cream,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.ruleLine)),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: CeladonColors.sage, width: 1.5)),
+                labelStyle: TextStyle(color: context.ct.textSecondary, fontSize: 13),
+                suffix: Text('days', style: TextStyle(fontSize: 12, color: context.ct.textSecondary)),
+                filled: true, fillColor: context.ct.surface,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: context.ct.border)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: context.ct.sage, width: 1.5)),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: CeladonColors.mutedSage))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: context.ct.textSecondary))),
           TextButton(
             onPressed: () {
               final name = nameCtrl.text.trim();
@@ -4619,7 +4704,7 @@ Return ONLY the JSON array, no markdown, no explanation.
               if (name.isEmpty) return;
               Navigator.pop(ctx, (name, days.clamp(1, 365)));
             },
-            child: const Text('Pick File →', style: TextStyle(color: CeladonColors.sage, fontWeight: FontWeight.w700)),
+            child: Text('Pick File →', style: TextStyle(color: context.ct.sage, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -4628,8 +4713,9 @@ Return ONLY the JSON array, no markdown, no explanation.
 
   @override
   Widget build(BuildContext context) {
+    final ct = context.ct;
     return Scaffold(
-      backgroundColor: CeladonColors.cream,
+      backgroundColor: ct.bg,
       body: NotebookBackground(
         child: SafeArea(
           child: CustomScrollView(
@@ -4649,18 +4735,18 @@ Return ONLY the JSON array, no markdown, no explanation.
                     margin: const EdgeInsets.fromLTRB(24, 8, 24, 0),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFDE8E8),
+                      color: ct.bg,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFD96060).withAlpha(80)),
+                      border: Border.all(color: const Color(0xFFD96060)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.error_outline_rounded, size: 16, color: Color(0xFFD96060)),
+                        Icon(Icons.error_outline_rounded, size: 16, color: const Color(0xFFD96060)),
                         const SizedBox(width: 8),
-                        Expanded(child: Text(_error!, style: const TextStyle(fontSize: 11, color: Color(0xFFD96060)))),
+                        Expanded(child: Text(_error!, style: TextStyle(fontSize: 11, color: const Color(0xFFD96060)))),
                         GestureDetector(
                           onTap: () => setState(() => _error = null),
-                          child: const Icon(Icons.close_rounded, size: 14, color: Color(0xFFD96060)),
+                          child: Icon(Icons.close_rounded, size: 14, color: const Color(0xFFD96060)),
                         ),
                       ],
                     ),
@@ -4669,15 +4755,15 @@ Return ONLY the JSON array, no markdown, no explanation.
 
               // ── Loading
               if (_isLoading)
-                const SliverToBoxAdapter(
+                SliverToBoxAdapter(
                   child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
+                    padding: const EdgeInsets.symmetric(vertical: 40),
                     child: Center(
                       child: Column(
                         children: [
-                          SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5, color: CeladonColors.sage)),
-                          SizedBox(height: 12),
-                          Text('AI is reading your syllabus...', style: TextStyle(fontSize: 12, color: CeladonColors.mutedSage, fontStyle: FontStyle.italic)),
+                          SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2.5, color: ct.sage)),
+                          const SizedBox(height: 12),
+                          Text('AI is reading your syllabus...', style: TextStyle(fontSize: 12, color: ct.textSecondary, fontStyle: FontStyle.italic)),
                         ],
                       ),
                     ),
@@ -4691,17 +4777,17 @@ Return ONLY the JSON array, no markdown, no explanation.
                     padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 40),
                     child: Column(
                       children: [
-                        Icon(Icons.auto_stories_rounded, size: 52, color: CeladonColors.mutedSage.withAlpha(120)),
+                        Icon(Icons.auto_stories_rounded, size: 52, color: ct.textSecondary.withAlpha(120)),
                         const SizedBox(height: 16),
-                        const Text(
+                        Text(
                           'No syllabi yet',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown),
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ct.textPrimary),
                         ),
                         const SizedBox(height: 6),
-                        const Text(
+                        Text(
                           'Upload a syllabus PDF or image and\nAI will generate your study roadmap',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 12, color: CeladonColors.mutedSage, height: 1.5),
+                          style: TextStyle(fontSize: 12, color: ct.textSecondary, height: 1.5),
                         ),
                         const SizedBox(height: 20),
                         GestureDetector(
@@ -4709,9 +4795,9 @@ Return ONLY the JSON array, no markdown, no explanation.
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                             decoration: BoxDecoration(
-                              color: CeladonColors.sage,
+                              color: ct.sage,
                               borderRadius: BorderRadius.circular(14),
-                              boxShadow: [BoxShadow(color: CeladonColors.sage.withAlpha(60), blurRadius: 8, offset: const Offset(0, 3))],
+                              boxShadow: [BoxShadow(color: ct.sage.withAlpha(60), blurRadius: 8, offset: const Offset(0, 3))],
                             ),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
@@ -4738,7 +4824,7 @@ Return ONLY the JSON array, no markdown, no explanation.
                       children: [
                         Text(
                           '${_subjects.length} SUBJECT${_subjects.length > 1 ? 'S' : ''}',
-                          style: const TextStyle(fontSize: 10, letterSpacing: 1.5, color: CeladonColors.mutedSage, fontWeight: FontWeight.w700),
+                          style: TextStyle(fontSize: 10, letterSpacing: 1.5, color: ct.textSecondary, fontWeight: FontWeight.w700),
                         ),
                         const Spacer(),
                         GestureDetector(
@@ -4746,15 +4832,15 @@ Return ONLY the JSON array, no markdown, no explanation.
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
-                              color: CeladonColors.sageLight,
+                              color: ct.sageLight,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Row(
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.add_rounded, size: 12, color: CeladonColors.sage),
-                                SizedBox(width: 3),
-                                Text('Add Syllabus', style: TextStyle(fontSize: 10, color: CeladonColors.sage, fontWeight: FontWeight.w600)),
+                                Icon(Icons.add_rounded, size: 12, color: ct.sage),
+                                const SizedBox(width: 3),
+                                Text('Add Syllabus', style: TextStyle(fontSize: 10, color: ct.sage, fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -4816,6 +4902,7 @@ class _SyllabusCardState extends State<_SyllabusCard> {
   Widget build(BuildContext context) {
     final sub = widget.subject;
     final pct = (sub.progress * 100).round();
+    final ct = context.ct;
 
     return Dismissible(
       key: Key('syl-${sub.name}-${sub.createdAt.millisecondsSinceEpoch}'),
@@ -4834,10 +4921,10 @@ class _SyllabusCardState extends State<_SyllabusCard> {
       child: Container(
         margin: const EdgeInsets.fromLTRB(24, 0, 24, 10),
         decoration: BoxDecoration(
-          color: CeladonColors.pageWhite,
+          color: context.ct.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: sub.color.withAlpha(100)),
-          boxShadow: const [BoxShadow(color: CeladonColors.softShadow, blurRadius: 8, offset: Offset(0, 3))],
+          boxShadow: [BoxShadow(color: context.ct.shadow, blurRadius: 8, offset: const Offset(0, 3))],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4859,7 +4946,7 @@ class _SyllabusCardState extends State<_SyllabusCard> {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Text(sub.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: CeladonColors.inkBrown)),
+                          child: Text(sub.name, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.ct.textPrimary)),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -4876,7 +4963,7 @@ class _SyllabusCardState extends State<_SyllabusCard> {
                         AnimatedRotation(
                           turns: _expanded ? 0.5 : 0,
                           duration: const Duration(milliseconds: 200),
-                          child: Icon(Icons.keyboard_arrow_down_rounded, size: 20, color: CeladonColors.mutedSage),
+                          child: Icon(Icons.keyboard_arrow_down_rounded, size: 20, color: context.ct.textSecondary),
                         ),
                       ],
                     ),
@@ -4887,7 +4974,7 @@ class _SyllabusCardState extends State<_SyllabusCard> {
                       child: LinearProgressIndicator(
                         value: sub.progress,
                         minHeight: 5,
-                        backgroundColor: CeladonColors.ruleLine,
+                        backgroundColor: context.ct.border,
                         valueColor: AlwaysStoppedAnimation(sub.color),
                       ),
                     ),
@@ -4901,7 +4988,7 @@ class _SyllabusCardState extends State<_SyllabusCard> {
                         const Spacer(),
                         Text(
                           '$pct% · ${sub.totalDays} days',
-                          style: const TextStyle(fontSize: 10, color: CeladonColors.mutedSage),
+                          style: TextStyle(fontSize: 10, color: context.ct.textSecondary),
                         ),
                       ],
                     ),
@@ -4912,7 +4999,7 @@ class _SyllabusCardState extends State<_SyllabusCard> {
 
             // Expanded day-by-day roadmap
             if (_expanded) ...[
-              Container(height: 1, color: CeladonColors.ruleLine),
+              Container(height: 1, color: context.ct.border),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
                 child: Column(
@@ -4976,21 +5063,21 @@ class _DayGroup extends StatelessWidget {
             width: 44,
             padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
-              color: isCurrent ? color : (allDone ? color.withAlpha(20) : CeladonColors.cream),
+              color: isCurrent ? color : (allDone ? color.withAlpha(20) : context.ct.bg),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: isCurrent ? color : CeladonColors.ruleLine),
+              border: Border.all(color: isCurrent ? color : context.ct.border),
             ),
             child: Column(
               children: [
                 Text(
                   'Day',
-                  style: TextStyle(fontSize: 8, color: isCurrent ? Colors.white70 : CeladonColors.mutedSage),
+                  style: TextStyle(fontSize: 8, color: isCurrent ? Colors.white70 : context.ct.textSecondary),
                 ),
                 Text(
                   '$day',
                   style: TextStyle(
                     fontSize: 14, fontWeight: FontWeight.w700,
-                    color: isCurrent ? Colors.white : (allDone ? color : CeladonColors.inkBrown),
+                    color: isCurrent ? Colors.white : (allDone ? color : context.ct.textPrimary),
                   ),
                 ),
               ],
@@ -5007,9 +5094,9 @@ class _DayGroup extends StatelessWidget {
                     margin: const EdgeInsets.only(bottom: 4),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                     decoration: BoxDecoration(
-                      color: ch.isDone ? color.withAlpha(15) : CeladonColors.cream,
+                      color: ch.isDone ? color.withAlpha(15) : context.ct.bg,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: ch.isDone ? color.withAlpha(60) : CeladonColors.ruleLine),
+                      border: Border.all(color: ch.isDone ? color.withAlpha(60) : context.ct.border),
                     ),
                     child: Row(
                       children: [
@@ -5031,9 +5118,9 @@ class _DayGroup extends StatelessWidget {
                                 ch.title,
                                 style: TextStyle(
                                   fontSize: 11.5, fontWeight: FontWeight.w600,
-                                  color: ch.isDone ? CeladonColors.mutedSage : CeladonColors.inkBrown,
+                                  color: ch.isDone ? context.ct.textSecondary : context.ct.textPrimary,
                                   decoration: ch.isDone ? TextDecoration.lineThrough : null,
-                                  decorationColor: CeladonColors.mutedSage,
+                                  decorationColor: context.ct.textSecondary,
                                 ),
                               ),
                               if (ch.description.isNotEmpty)
@@ -5041,7 +5128,7 @@ class _DayGroup extends StatelessWidget {
                                   ch.description,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 9.5, color: CeladonColors.mutedSage),
+                                  style: TextStyle(fontSize: 9.5, color: context.ct.textSecondary),
                                 ),
                             ],
                           ),
