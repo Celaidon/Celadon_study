@@ -1,11 +1,10 @@
 <div align="center">
 
-<!-- PLACE YOUR BANNER IMAGE HERE (recommended: 1280x640px) -->
-<!-- Example: ![Celadon Banner](images/banner.png) -->
+
 
 <br/>
 
-<img src="assets/main_screen.png" alt="Celadon" width="160"/>
+<img src="assets/celadon.png" alt="Celadon" width="160"/>
 
 <h1>C E L A D O N</h1>
 
@@ -29,19 +28,16 @@
 
 ## 📸 Screenshots
 
-> Add your screenshots inside an `images/` folder at the root of your repo and update the paths below.
-
 <br/>
 
 | Login Screen | Today's Tasks | Study Tracker |
 |:---:|:---:|:---:|
-| ![Login](images/screenshot_login.png) | ![Today](images/screenshot_today.png) | ![Study](images/screenshot_study.png) |
+| ![Login](assets/loginscreen.png) | ![Today](assets/today.png) | ![Study](assets/study.png) |
 
 | Calendar | Full Calendar | Syllabus Roadmap |
 |:---:|:---:|:---:|
-| ![Calendar](images/screenshot_calendar_mini.png) | ![Full Calendar](images/screenshot_calendar_full.png) | ![Syllabus](images/screenshot_syllabus.png) |
+| ![Calendar](assets/calendermini.png) | ![Full Calendar](assets/calender.png) | ![Syllabus](assets/roadmap.png) |
 
-> 📌 **Where to place images:** Create a folder `images/` in the project root, name your screenshots as shown above, and commit them.
 
 ---
 
@@ -332,5 +328,7 @@ Made with 🐻 and ☕ &nbsp;|&nbsp; Built with [Flutter](https://flutter.dev) &
 **⭐ Star this repo if you found it useful!**
 
 *"Study smart, not hard."*
+
+**-VANI**
 
 </div>
