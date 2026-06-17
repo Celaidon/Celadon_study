@@ -260,7 +260,7 @@ celadon/
 │   ├── manifest.json             # PWA manifest (name, colours, icons)
 │   └── icons/                    # App icons (192px, 512px)
 │
-├── images/                       # README screenshots (add yours here)
+├── images/                       # README screenshots- shifted to assets
 │
 ├── android/                      # Android platform files
 ├── ios/                          # iOS platform files
